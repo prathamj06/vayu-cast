@@ -7,7 +7,7 @@ export const AQI_CATEGORIES: AQICategory[] = [
     min: 0,
     max: 50,
     color: "#00E400",
-    rgb: [0, 228, 0, 180],
+    rgb: [0, 228, 0, 65],
     description: "Air quality is considered satisfactory, and air pollution poses little or no risk.",
     textColor: "#000000"
   },
@@ -17,7 +17,7 @@ export const AQI_CATEGORIES: AQICategory[] = [
     min: 51,
     max: 100,
     color: "#FFFF00",
-    rgb: [255, 255, 0, 180],
+    rgb: [255, 255, 0, 65],
     description: "Air quality is acceptable; however, some pollutants may pose moderate health concern for sensitive individuals.",
     textColor: "#000000"
   },
@@ -27,7 +27,7 @@ export const AQI_CATEGORIES: AQICategory[] = [
     min: 101,
     max: 150,
     color: "#FF7E00",
-    rgb: [255, 126, 0, 180],
+    rgb: [255, 126, 0, 65],
     description: "Members of sensitive groups (children, elderly, respiratory patients) may experience health effects.",
     textColor: "#FFFFFF"
   },
@@ -37,7 +37,7 @@ export const AQI_CATEGORIES: AQICategory[] = [
     min: 151,
     max: 200,
     color: "#FF0000",
-    rgb: [255, 0, 0, 180],
+    rgb: [255, 0, 0, 65],
     description: "Everyone may begin to experience health effects; members of sensitive groups may experience more serious health effects.",
     textColor: "#FFFFFF"
   },
@@ -47,7 +47,7 @@ export const AQI_CATEGORIES: AQICategory[] = [
     min: 201,
     max: 300,
     color: "#8F3F97",
-    rgb: [143, 63, 151, 180],
+    rgb: [143, 63, 151, 65],
     description: "Health alert: The risk of health effects is increased for everyone.",
     textColor: "#FFFFFF"
   },
@@ -57,7 +57,7 @@ export const AQI_CATEGORIES: AQICategory[] = [
     min: 301,
     max: 999,
     color: "#7E0023",
-    rgb: [126, 0, 35, 195],
+    rgb: [126, 0, 35, 75],
     description: "Health warning of emergency conditions: The entire population is more likely to be affected.",
     textColor: "#FFFFFF"
   },
@@ -77,7 +77,7 @@ export function getAQIColor(aqi: number): string {
   return getAQICategory(aqi).color;
 }
 
-export function getAQIRGB(aqi: number, alpha: number = 180): [number, number, number, number] {
+export function getAQIRGB(aqi: number, alpha: number = 65): [number, number, number, number] {
   const cat = getAQICategory(aqi);
   return [cat.rgb[0], cat.rgb[1], cat.rgb[2], alpha];
 }

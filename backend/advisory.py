@@ -1,8 +1,8 @@
 """
-VAYU - Gemini AI Multilingual Advisory & Satellite Source Attribution Engine
-Generates zone-level health advisories in English & Hindi via Google Gemini (gemini-2.5-flash)
+VAYU - Gemini AI Multilingual Advisory & Domain-Accurate Source Attribution Engine
+Generates zone-level health advisories in English & Hindi via Google Gemini
 with strict rate-limit shielding (time.sleep(2) between zone queries < 15 RPM),
-and calculates physical source attribution splits (% Traffic, Stubble, Industry, Dust).
+and calculates ground-truth aligned spatial source attribution based on actual Delhi land use.
 """
 
 import os
@@ -18,38 +18,59 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# Strict Urban Land-Use Categorization for Delhi Municipal Zones
+ZONE_LAND_USE_TYPES = {
+    # Heavy Industrial & Interstate Transport Nodes
+    "Okhla Industrial": "INDUSTRIAL",
+    "Narela": "INDUSTRIAL",
+    "Anand Vihar": "INDUSTRIAL_TRANSPORT",
+
+    # Pure Residential, Green Canopy, Institutional & Aerodrome (ZERO Heavy Industry)
+    "South Delhi": "RESIDENTIAL_GREEN",
+    "Central Delhi": "GOVERNMENT_HERITAGE",
+    "Dwarka": "SUBURBAN_RESIDENTIAL",
+    "North Delhi": "UNIVERSITY_INSTITUTIONAL",
+    "IGI Airport": "AVIATION_TRANSPORT",
+
+    # High-Density Commercial Corridors & Mixed Residential (Minor Light Workshops Only)
+    "West Delhi": "MIXED_COMMERCIAL",
+    "East Delhi": "HIGH_DENSITY_RESIDENTIAL",
+    "Shahdara": "HIGH_DENSITY_MIXED",
+    "Rohini": "SUBURBAN_MIXED",
+}
+
 
 def get_fallback_advisories(zone_name: str, aqi: float) -> Tuple[str, str]:
     """Generates localized bilingual fallback health advisories based on AQI category."""
     if aqi <= 50:
         return (
-            f"Air quality in {zone_name} is Good (AQI {round(aqi)}). Ideal for all outdoor exercises and activities.",
-            f"{zone_name} में वायु गुणवत्ता अच्छी है (AQI {round(aqi)})। सभी बाहरी गतिविधियों और व्यायाम के लिए उत्तम।"
+            f"Air quality in {zone_name} is Good (AQI {round(aqi)}). Ideal for all outdoor exercises and sports.",
+            f"{zone_name} में वायु गुणवत्ता अच्छी है (AQI {round(aqi)})। सभी बाहरी गतिविधियों और खेलकूद के लिए उपयुक्त।"
         )
     elif aqi <= 100:
         return (
-            f"Air quality in {zone_name} is Moderate (AQI {round(aqi)}). Unusually sensitive individuals should limit prolonged outdoor exertion.",
-            f"{zone_name} में वायु गुणवत्ता मध्यम है (AQI {round(aqi)})। अत्यधिक संवेदनशील व्यक्ति लंबे समय तक बाहरी गतिविधियों को सीमित करें।"
+            f"Air quality in {zone_name} is Moderate (AQI {round(aqi)}). Unusually sensitive individuals should monitor outdoor exertion.",
+            f"{zone_name} में वायु गुणवत्ता मध्यम है (AQI {round(aqi)})। अत्यधिक संवेदनशील लोग लंबे बाहरी श्रम पर ध्यान दें।"
         )
     elif aqi <= 150:
         return (
-            f"Unhealthy for Sensitive Groups in {zone_name} (AQI {round(aqi)}). Children, elderly, and asthma patients should wear N95 masks outdoors.",
-            f"{zone_name} में संवेदनशील समूहों के लिए अस्वस्थ वायु (AQI {round(aqi)})। बच्चे, बुजुर्ग और सांस के रोगी बाहर निकलते समय N95 मास्क पहनें।"
+            f"Unhealthy for Sensitive Groups in {zone_name} (AQI {round(aqi)}). Children, elderly, and respiratory patients should reduce heavy outdoor exertion.",
+            f"{zone_name} में संवेदनशील समूहों के लिए अस्वस्थ वायु (AQI {round(aqi)})। बच्चे, बुजुर्ग और सांस के मरीज भारी बाहरी श्रम कम करें।"
         )
     elif aqi <= 200:
         return (
-            f"Unhealthy air across {zone_name} (AQI {round(aqi)}). Everyone should reduce heavy outdoor exertion. Keep indoor air purifiers active.",
-            f"{zone_name} में अस्वस्थ हवा (AQI {round(aqi)})। सभी लोग भारी बाहरी व्यायाम कम करें और घरों में एयर प्यूरीफायर चलाएं।"
+            f"Unhealthy air alert across {zone_name} (AQI {round(aqi)}). General public should limit prolonged outdoor workouts. Keep indoor air clean.",
+            f"{zone_name} में अस्वस्थ हवा का अलर्ट (AQI {round(aqi)})। आम नागरिक लंबे बाहरी व्यायाम से बचें और घरों में वेंटिलेशन सीमित रखें।"
         )
     elif aqi <= 300:
         return (
-            f"Very Unhealthy air alert in {zone_name} (AQI {round(aqi)}). Avoid outdoor activities. High particulate entrapment; wear N95/FFP2 masks.",
-            f"{zone_name} में बहुत अस्वस्थ हवा का अलर्ट (AQI {round(aqi)})। बाहरी गतिविधियों से बचें। N95/FFP2 मास्क का अनिवार्य उपयोग करें।"
+            f"Very Unhealthy air conditions in {zone_name} (AQI {round(aqi)}). Significant particulate entrapment. Wear N95 masks when outside.",
+            f"{zone_name} में बहुत अस्वस्थ स्थिति (AQI {round(aqi)})। प्रदूषण का उच्च स्तर। बाहर जाते समय N95 मास्क अवश्य पहनें।"
         )
     else:
         return (
-            f"HAZARDOUS EMERGENCY in {zone_name} (AQI {round(aqi)})! Severe atmospheric inversion. Avoid all outdoor exposure; seal windows and use HEPA purifiers.",
-            f"{zone_name} में गंभीर आपातकालीन स्थिति (AQI {round(aqi)})! गंभीर प्रदूषण। सभी बाहरी संपर्क से बचें, खिड़कियां बंद रखें और HEPA प्यूरीफायर चालू रखें।"
+            f"HAZARDOUS EMERGENCY in {zone_name} (AQI {round(aqi)})! Severe winter inversion. Avoid all non-essential outdoor exposure and run air purifiers.",
+            f"{zone_name} में गंभीर आपातकालीन स्थिति (AQI {round(aqi)})! भीषण प्रदूषण। गैर-जरूरी बाहरी आवाजाही से बचें और एयर प्यूरीफायर चलाएं।"
         )
 
 
@@ -65,27 +86,26 @@ def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[st
         try:
             from google import genai
             client = genai.Client(api_key=GEMINI_API_KEY)
-            logger.info("Initialized Google GenAI client successfully.")
+            logger.info("Initialized Google GenAI client.")
         except Exception as e:
-            logger.warning(f"Could not initialize Google GenAI SDK: {e}. Using fallback generator.")
+            logger.warning(f"Could not initialize Google GenAI SDK: {e}. Using calibrated fallback generator.")
 
     for zone_name, data in zones_data.items():
-        avg_aqi = data.get("current_aqi", 200)
+        avg_aqi = data.get("current_aqi", 150)
         dom_source = data.get("dominant_source", "Vehicular Traffic")
 
         if client is not None:
             try:
                 prompt = (
-                    f"You are the official Delhi Air Quality Chief Health Officer. "
-                    f"Zone: '{zone_name}', Current AQI: {round(avg_aqi)}, Dominant Pollution Source: {dom_source}. "
+                    f"You are the official Delhi Air Quality Health Officer. "
+                    f"Zone: '{zone_name}', Current AQI: {round(avg_aqi)}, Dominant Pollution: {dom_source}. "
                     f"Generate a concise, authoritative 1-2 sentence public health advisory in English, "
-                    f"and its precise translation/counterpart in formal Hindi (Devanagari script). "
-                    f"Format your response EXACTLY as:\n"
+                    f"and its formal Hindi (Devanagari) counterpart. "
+                    f"Format strictly as:\n"
                     f"EN: <English Advisory>\n"
                     f"HI: <Hindi Advisory>"
                 )
 
-                # Try modern available models: gemini-2.5-flash, gemini-2.0-flash, or gemini-1.5-flash
                 text = ""
                 for model_candidate in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
                     try:
@@ -96,26 +116,23 @@ def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[st
                         if response and response.text:
                             text = response.text.strip()
                             break
-                    except Exception as model_err:
-                        logger.debug(f"Model {model_candidate} not available: {model_err}")
+                    except Exception:
                         continue
 
                 en_adv = ""
                 hi_adv = ""
-
-                for line in text.split("\n"):
-                    if line.startswith("EN:"):
-                        en_adv = line.replace("EN:", "").strip()
-                    elif line.startswith("HI:"):
-                        hi_adv = line.replace("HI:", "").strip()
+                if text:
+                    for line in text.split("\n"):
+                        if line.startswith("EN:"):
+                            en_adv = line.replace("EN:", "").strip()
+                        elif line.startswith("HI:"):
+                            hi_adv = line.replace("HI:", "").strip()
 
                 if not en_adv or not hi_adv:
                     en_adv, hi_adv = get_fallback_advisories(zone_name, avg_aqi)
 
                 advisories[zone_name] = {"en": en_adv, "hi": hi_adv}
-                logger.info(f"Generated Gemini advisory for {zone_name} (AQI {round(avg_aqi)})")
-
-                # MANDATORY RATE LIMIT DELAY: Pace 2.0 seconds between zone requests to strictly stay < 15 RPM
+                logger.info(f"Generated advisory for {zone_name} (AQI {round(avg_aqi)})")
                 time.sleep(2.0)
 
             except Exception as e:
@@ -138,52 +155,74 @@ def calculate_source_attribution(
     month: int = 11
 ) -> Dict[str, int]:
     """
-    Computes heuristic source attribution percentages strictly summing to 100%.
-    Factors:
-    - Traffic: Peak during commuting hours (8-11 AM, 6-9 PM)
-    - Stubble: High in October-November with NW winds (270-340 deg)
-    - Industry: Heavy in industrial zones (Okhla, Narela, Anand Vihar)
-    - Dust: Higher with high wind speeds (>10 km/h) and dry weather
+    Computes domain-accurate source attribution strictly aligned with Delhi's actual land use:
+    - Residential & Green Zones (South Delhi, Central, Dwarka, DU, IGI Airport): ZERO heavy industry.
+      Dominated by vehicular traffic (50-65%), road dust (25-35%), and regional stubble/secondary aerosols.
+    - Heavy Industrial Zones (Okhla, Narela, Anand Vihar): Industry is 30-45%.
+    - Commercial / Mixed Corridors (West Delhi, East Delhi, Shahdara, Rohini): Minor light industry (5-10%).
+    All percentages strictly sum to 100%.
     """
-    # 1. Traffic weight
-    traffic_weight = 30.0
+    land_use = ZONE_LAND_USE_TYPES.get(zone_name, "SUBURBAN_MIXED")
+
+    # Determine base attribution profile by actual land use
+    if land_use in ["INDUSTRIAL", "INDUSTRIAL_TRANSPORT"]:
+        # Industrial clusters
+        base_traffic = 30.0
+        base_industry = 38.0
+        base_dust = 22.0
+        base_stubble = 10.0
+    elif land_use in ["RESIDENTIAL_GREEN", "GOVERNMENT_HERITAGE", "SUBURBAN_RESIDENTIAL", "UNIVERSITY_INSTITUTIONAL", "AVIATION_TRANSPORT"]:
+        # Strictly residential / green / institutional - ZERO to negligible industry
+        base_traffic = 58.0
+        base_industry = 0.0 # Strict zero industrial emissions in residential/green zones
+        base_dust = 30.0
+        base_stubble = 12.0
+    else:
+        # Mixed commercial / residential
+        base_traffic = 52.0
+        base_industry = 7.0 # Light local repair/small workshop emissions
+        base_dust = 28.0
+        base_stubble = 13.0
+
+    # Diurnal Rush Hour Adjustments
     if 8 <= hour <= 11 or 17 <= hour <= 21:
-        traffic_weight += 20.0
-    if zone_name in ["Central Delhi", "West Delhi", "East Delhi", "South Delhi", "Shahdara"]:
-        traffic_weight += 10.0
+        base_traffic += 15.0
+    elif 1 <= hour <= 5:
+        base_traffic -= 12.0
+        if land_use in ["INDUSTRIAL", "INDUSTRIAL_TRANSPORT"]:
+            base_industry += 10.0 # Night-time heavy industrial operations
 
-    # 2. Agricultural Stubble weight
-    stubble_weight = 5.0
-    if month in [10, 11, 12]:  # Post-monsoon harvest burning
-        stubble_weight += 25.0
-        # Check if wind is coming from North-West (Punjab/Haryana corridor: 270° to 340°)
-        if 260 <= wind_dir <= 350:
-            stubble_weight += 20.0
+    # Wind Speed & Resuspension
+    if wind_speed > 12.0:
+        base_dust += 15.0
+    elif wind_speed < 4.0:
+        base_dust -= 6.0
 
-    # 3. Industrial Combustion weight
-    industry_weight = 15.0
-    if zone_name in ["Okhla Industrial", "Narela", "Anand Vihar", "Rohini"]:
-        industry_weight += 25.0
-    if hour >= 22 or hour <= 5:  # Night-time industrial activity & heavy diesel trucking
-        industry_weight += 15.0
+    # Seasonal Agricultural Stubble Factor (October - November NW winds)
+    if month in [10, 11] and 270 <= wind_dir <= 340:
+        base_stubble += 22.0
 
-    # 4. Dust / Road Resuspension weight
-    dust_weight = 15.0
-    if wind_speed > 10.0:
-        dust_weight += 15.0
-    if month in [3, 4, 5, 6]:  # Summer dry dust storms
-        dust_weight += 20.0
+    # Ensure non-negative and normalize strictly to 100%
+    w_t = max(20.0, base_traffic)
+    w_i = max(0.0, base_industry)
+    w_d = max(10.0, base_dust)
+    w_s = max(5.0, base_stubble)
 
-    # Normalize to 100%
-    total = traffic_weight + stubble_weight + industry_weight + dust_weight
-    t_pct = int(round((traffic_weight / total) * 100))
-    s_pct = int(round((stubble_weight / total) * 100))
-    i_pct = int(round((industry_weight / total) * 100))
-    d_pct = 100 - (t_pct + s_pct + i_pct)
+    total = w_t + w_i + w_d + w_s
+    pct_t = int(round((w_t / total) * 100))
+    pct_i = int(round((w_i / total) * 100)) if base_industry > 0 else 0
+    pct_s = int(round((w_s / total) * 100))
+    pct_d = 100 - (pct_t + pct_i + pct_s)
+
+    # In purely residential/green zones, hard-clamp industrial to 0
+    if land_use in ["RESIDENTIAL_GREEN", "GOVERNMENT_HERITAGE", "SUBURBAN_RESIDENTIAL", "UNIVERSITY_INSTITUTIONAL", "AVIATION_TRANSPORT"]:
+        if pct_i > 0:
+            pct_t += pct_i
+            pct_i = 0
 
     return {
-        "traffic": max(5, t_pct),
-        "stubble": max(2, s_pct),
-        "industry": max(5, i_pct),
-        "dust": max(3, d_pct)
+        "traffic": pct_t,
+        "stubble": pct_s,
+        "industry": pct_i,
+        "dust": pct_d
     }
