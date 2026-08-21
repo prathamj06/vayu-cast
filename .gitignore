@@ -1,0 +1,25 @@
+# Secrets & Environment Variables (NEVER COMMIT)
+.env
+.env*.local
+.env.production
+.env.development
+*.pem
+*.key
+credentials.json
+~/.config/earthengine/credentials
+
+# Dependencies & Build Artifacts
+node_modules/
+.next/
+out/
+build/
+dist/
+venv/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+.turbo
+.swc
+*.csv

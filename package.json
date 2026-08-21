@@ -1,0 +1,15 @@
+{
+  "name": "vayucast-platform",
+  "version": "1.0.0",
+  "description": "VAYU - Urban Air Quality Intelligence Platform for NCT Delhi",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix frontend run start",
+    "pipeline": "python backend/pipeline.py",
+    "train": "python backend/models/train_model.py"
+  },
+  "keywords": ["aqi", "delhi", "xgboost", "deckgl", "maplibre", "gemini-ai", "h3", "geospatial"],
+  "author": "VayuCast Team",
+  "license": "MIT"
+}
