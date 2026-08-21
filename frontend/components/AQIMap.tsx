@@ -11,15 +11,15 @@ import { AlertCircle, Eye } from 'lucide-react';
 // Free, keyless CARTO Dark Matter Basemap Style
 const CARTO_DARK_MATTER_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
-// NCT Delhi Initial Geospatial Camera Position
+// Direct 2D Top-Down (Nadir) Geospatial Camera Position centered on NCT Delhi
 const INITIAL_VIEW_STATE = {
   latitude: 28.6139,
   longitude: 77.2090,
-  zoom: 10.4,
+  zoom: 10.3,
   minZoom: 8,
   maxZoom: 15,
-  pitch: 32,
-  bearing: -8,
+  pitch: 0,    // 0° Pitch: Direct 2D Top-Down Nadir View
+  bearing: 0,  // 0° Bearing: True North Orientation
 };
 
 interface WebGLErrorBoundaryProps {
@@ -129,30 +129,33 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
     }
   };
 
-  // Construct Deck.gl H3 Hexagon Layer
+  // Construct Deck.gl H3 Hexagon Layer with Refined Translucency & Crisp Geography Visibility
   const layers = useMemo(() => {
     return [
       new H3HexagonLayer<HexagonData>({
         id: 'h3-delhi-aqi-layer',
         data: hexagons,
         pickable: true,
-        wireframe: true,
+        stroked: true,
         filled: true,
         extruded: false,
         getHexagon: (d) => d.hex_id,
+        // Refined translucent fill (alpha = 65 / ~25% opacity) so underlying streets & labels are fully legible
         getFillColor: (d) => {
           const aqiVal = d.forecast_72h?.[currentHour] ?? d.aqi;
           const isSelected = selectedHexagon?.hex_id === d.hex_id;
-          return getAQIRGB(aqiVal, isSelected ? 240 : 180);
+          return getAQIRGB(aqiVal, isSelected ? 120 : 65);
         },
+        // Crisp, high-precision stroke for geographic boundaries
         getLineColor: (d) => {
           if (selectedHexagon?.hex_id === d.hex_id) {
-            return [255, 255, 255, 255];
+            return [255, 255, 255, 255]; // Pure white highlight on selection
           }
-          return [0, 0, 0, 40];
+          return [255, 255, 255, 22];    // Subtle grid boundary
         },
-        getLineWidth: (d) => (selectedHexagon?.hex_id === d.hex_id ? 3 : 1),
+        getLineWidth: (d) => (selectedHexagon?.hex_id === d.hex_id ? 2.5 : 0.8),
         lineWidthUnits: 'pixels',
+        lineWidthMinPixels: 0.5,
         updateTriggers: {
           getFillColor: [currentHour, selectedHexagon?.hex_id],
           getLineColor: [selectedHexagon?.hex_id],
@@ -188,7 +191,7 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
         <DeckGL
           viewState={viewState}
           onViewStateChange={handleViewStateChange}
-          controller={{ doubleClickZoom: false, dragRotate: true }}
+          controller={{ doubleClickZoom: false, dragRotate: false }}
           layers={layers}
           getCursor={({ isHovering }) => (isHovering ? 'pointer' : 'default')}
         />
