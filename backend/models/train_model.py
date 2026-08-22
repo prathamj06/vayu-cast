@@ -23,8 +23,10 @@ TRAINING_CSV_PATH = "backend/models/training_data.csv"
 
 FEATURE_COLUMNS = [
     "aqi_lag_1h",
+    "aqi_lag_2h",
     "aqi_lag_3h",
     "aqi_lag_24h",
+    "station_base",
     "temperature_2m",
     "relative_humidity_2m",
     "wind_speed_10m",
@@ -48,6 +50,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(by=["station_id", "time"]).reset_index(drop=True)
 
     df["aqi_lag_1h"] = df.groupby("station_id")["aqi"].shift(1)
+    df["aqi_lag_2h"] = df.groupby("station_id")["aqi"].shift(2)
     df["aqi_lag_3h"] = df.groupby("station_id")["aqi"].shift(3)
     df["aqi_lag_24h"] = df.groupby("station_id")["aqi"].shift(24)
 
@@ -95,11 +98,11 @@ def train_aqi_model():
     logger.info(f"Training samples: {len(X_train)} | Validation samples: {len(X_test)}")
 
     model = xgb.XGBRegressor(
-        n_estimators=300,
-        learning_rate=0.03,
-        max_depth=6,
-        subsample=0.85,
-        colsample_bytree=0.85,
+        n_estimators=350,
+        learning_rate=0.04,
+        max_depth=7,
+        subsample=0.88,
+        colsample_bytree=0.88,
         random_state=42,
         tree_method="hist",
         n_jobs=-1
@@ -118,12 +121,14 @@ def train_aqi_model():
     rmse_model = np.sqrt(mean_squared_error(y_test, y_pred))
     mae_model = mean_absolute_error(y_test, y_pred)
     r2_model = r2_score(y_test, y_pred)
+    mape_model = np.mean(np.abs(y_test - y_pred) / np.maximum(20.0, y_test))
+    accuracy_pct = (1.0 - mape_model) * 100.0
 
     rmse_persist = np.sqrt(mean_squared_error(y_test, y_persistence))
     mae_persist = mean_absolute_error(y_test, y_persistence)
 
     logger.info("=" * 65)
-    logger.info(f"CALIBRATED XGBoost Model -> RMSE: {rmse_model:.2f} | MAE: {mae_model:.2f} | R²: {r2_model:.4f}")
+    logger.info(f"CALIBRATED XGBoost Model -> Accuracy: {accuracy_pct:.2f}% | R²: {r2_model:.4f} | RMSE: {rmse_model:.2f} | MAE: {mae_model:.2f}")
     logger.info(f"Persistence Baseline    -> RMSE: {rmse_persist:.2f} | MAE: {mae_persist:.2f}")
     logger.info(f"RMSE Improvement: {((rmse_persist - rmse_model) / rmse_persist) * 100:.2f}%")
     logger.info("=" * 65)

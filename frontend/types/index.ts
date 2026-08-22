@@ -32,6 +32,24 @@ export interface WeatherSummary {
   blh: number;
 }
 
+export interface TelemetryHealth {
+  is_stale: boolean;
+  source: string;
+  active_count: number;
+  ingestion_mode: string;
+  staleness_reason?: string;
+  timestamp?: string;
+  seasonal_factor?: number;
+}
+
+export interface CalibrationMetrics {
+  mean_bias_error: number;
+  forecast_accuracy_pct: number;
+  rolling_rmse: number;
+  total_verification_cycles: number;
+  last_recalibration_time?: string;
+}
+
 export interface GridPayload {
   timestamp: string;
   generated_at: string;
@@ -40,6 +58,8 @@ export interface GridPayload {
   dominant_pollutant: string;
   active_stations_count: number;
   total_hexagons: number;
+  telemetry_health?: TelemetryHealth;
+  calibration_metrics?: CalibrationMetrics;
   forecast_timestamps: string[];
   weather_summary?: WeatherSummary;
   zones_summary: {

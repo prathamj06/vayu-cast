@@ -135,8 +135,11 @@ def generate_training_matrix(output_csv: str = "backend/models/training_data.csv
         # Base emission load
         base = st["base"]
 
-        # Seasonal variation (Winter elevation: Nov-Dec DOY 300-350, Monsoon drop: Jul-Aug DOY 180-240)
-        season_mod = 1.0 + 0.35 * np.cos(2 * np.pi * (doy - 330) / 365)
+        # Seasonal variation (Winter elevation: Nov-Jan DOY ~325, Monsoon drop: Jul-Aug DOY ~230)
+        f_winter = np.exp(-((doy - 325) / 45.0) ** 2) + np.exp(-((doy - (325 - 365)) / 45.0) ** 2) + np.exp(-((doy - (325 + 365)) / 45.0) ** 2)
+        f_monsoon = np.exp(-((doy - 230) / 40.0) ** 2)
+        f_summer = np.exp(-((doy - 130) / 35.0) ** 2)
+        season_mod = np.clip(0.85 + 0.80 * f_winter - 0.45 * f_monsoon + 0.10 * f_summer, 0.35, 1.75)
 
         # Boundary layer inversion modulation (moderate, capped factor)
         inversion_mod = np.clip(700.0 / np.clip(blh, 250, 1800), 0.75, 1.45)
