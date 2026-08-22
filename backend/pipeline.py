@@ -1,8 +1,9 @@
 """
 VAYU - Automated Live Hourly Pipeline Execution Engine
-High-performance batch execution integrating WAQI telemetry, H3 spatial grid mesh,
-IDW spatial interpolation, Open-Meteo 72h meteorology, calibrated XGBoost rolling inference,
-domain-accurate Gemini multilingual health advisories, and static snapshot export.
+High-performance batch execution integrating multi-source sensor telemetry,
+staleness guardrails, Dynamic Climatological Estimator (DCME), H3 spatial grid mesh,
+IDW spatial interpolation, Open-Meteo 72h meteorology, self-correcting adaptive recalibration,
+vectorized XGBoost rolling inference, Gemini multilingual advisories, and static snapshot export.
 """
 
 import os
@@ -21,10 +22,11 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from backend.ingestion.grid_builder import generate_delhi_h3_grid, idw_interpolation
-from backend.ingestion.fetch_waqi import fetch_live_waqi_telemetry
+from backend.ingestion.fetch_waqi import fetch_live_waqi_telemetry, get_telemetry_status
 from backend.ingestion.fetch_weather import fetch_72h_weather_forecast
 from backend.advisory import generate_gemini_advisories, calculate_source_attribution
 from backend.models.train_model import FEATURE_COLUMNS, train_aqi_model, MODEL_OUTPUT_PATH
+from backend.models.adaptive_calibration import AdaptiveCalibrationEngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -62,69 +64,20 @@ def get_category_name(aqi: float) -> str:
 
 def run_pipeline() -> dict:
     """
-    Executes end-to-end VAYU batch pipeline with spatially differentiated
-    XGBoost 72-hour forecasting and exports the static JSON payload.
+    Executes end-to-end VAYU batch pipeline with continuous error adaptation,
+    staleness remediation, and calibrated XGBoost 72-hour forecasting.
     """
     logger.info("=" * 60)
     logger.info("STARTING CALIBRATED VAYU INGESTION & FORECASTING PIPELINE")
     logger.info("=" * 60)
 
-    # 1. Generate H3 Spatial Grid (~1,500 hexagons)
-    logger.info("1. Generating Uber H3 spatial grid for NCT Delhi...")
-    grid = generate_delhi_h3_grid(resolution=8)
-    n_hex = len(grid)
-    target_points = [tuple(hex_data["centroid"]) for hex_data in grid]
+    now_dt = datetime.datetime.now()
+    now_iso = now_dt.isoformat()
 
-    # 2. Fetch Live Ground Station Telemetry with Microclimate Variance
-    logger.info("2. Ingesting live CPCB / WAQI station telemetry...")
-    station_points = fetch_live_waqi_telemetry()
-    logger.info(f"Ingested {len(station_points)} ground station feeds.")
-
-    # 3. IDW Spatial Interpolation for Current Hour AQI
-    logger.info("3. Running Inverse Distance Weighting (IDW) spatial interpolation...")
-    current_aqis = np.array(idw_interpolation(target_points, station_points, power=2.0), dtype=float)
-    logger.info(f"IDW spatial range: Min={np.min(current_aqis):.1f}, Max={np.max(current_aqis):.1f}, Mean={np.mean(current_aqis):.1f}")
-
-    # 4. Fetch 72-Hour Weather Forecast
-    logger.info("4. Querying Open-Meteo 72-hour forecast vectors...")
+    # 1. Fetch 72-Hour Weather Forecast First (needed for meteorological baseline conditioning)
+    logger.info("1. Querying Open-Meteo 72-hour forecast vectors...")
     weather = fetch_72h_weather_forecast()
     forecast_times = weather.get("times", [])
-
-    # 5. Load Pre-Trained XGBoost AQI Model
-    logger.info("5. Loading pre-trained XGBoost model artifact...")
-    if not os.path.exists(MODEL_OUTPUT_PATH):
-        logger.warning(f"Model {MODEL_OUTPUT_PATH} not found. Training model now...")
-        model = train_aqi_model()
-    else:
-        model = xgb.XGBRegressor()
-        model.load_model(MODEL_OUTPUT_PATH)
-        logger.info(f"Loaded XGBoost model from {MODEL_OUTPUT_PATH}")
-
-    # 6. Pre-calculate zone average AQI for Gemini advisories
-    now_dt = datetime.datetime.now()
-    zone_aqi_map = {}
-    zone_count_map = {}
-
-    for hex_data, cur_aqi in zip(grid, current_aqis):
-        z_name = hex_data["zone_name"]
-        zone_aqi_map[z_name] = zone_aqi_map.get(z_name, 0.0) + cur_aqi
-        zone_count_map[z_name] = zone_count_map.get(z_name, 0) + 1
-
-    zone_avg_aqi = {z: zone_aqi_map[z] / max(1, zone_count_map[z]) for z in zone_aqi_map}
-
-    # 7. Generate Gemini AI Multilingual Advisories for 12 Zones
-    logger.info("7. Generating Gemini AI health advisories for municipal zones...")
-    zones_input = {}
-    for z_name, avg_val in zone_avg_aqi.items():
-        zones_input[z_name] = {
-            "current_aqi": avg_val,
-            "dominant_source": "Vehicular Traffic" if avg_val < 200 else "Industrial & Stubble Emissions"
-        }
-
-    advisories = generate_gemini_advisories(zones_input)
-
-    # 8. High-Performance Spatially Conditioned 72-Hour Forward Forecasting
-    logger.info(f"8. Running calibrated 72-hour forward forecasting across all {n_hex} hexagons...")
     temps = weather["temperatures"]
     rhs = weather["humidity"]
     ws = weather["wind_speeds"]
@@ -134,37 +87,85 @@ def run_pipeline() -> dict:
     pressures = weather["pressures"]
     blhs = weather["blh"]
 
+    weather_summary = {
+        "temp": temps[0] if temps else 25.0,
+        "humidity": rhs[0] if rhs else 55.0,
+        "wind_speed": ws[0] if ws else 6.0,
+        "wind_dir": wdirs[0] if wdirs else 280.0,
+        "blh": blhs[0] if blhs else 450.0
+    }
+
+    # 2. Generate H3 Spatial Grid (~1,500 hexagons)
+    logger.info("2. Generating Uber H3 spatial grid for NCT Delhi...")
+    grid = generate_delhi_h3_grid(resolution=8)
+    n_hex = len(grid)
+    target_points = [tuple(hex_data["centroid"]) for hex_data in grid]
+
+    # 3. Ingest Telemetry with Staleness Detection & DCME Fallback
+    logger.info("3. Ingesting live CPCB / OpenAQ / WAQI station telemetry...")
+    station_points = fetch_live_waqi_telemetry(weather_summary=weather_summary)
+    telemetry_health = get_telemetry_status()
+    logger.info(f"Ingested {len(station_points)} ground station feeds (Mode: {telemetry_health.get('ingestion_mode')}).")
+
+    # 4. IDW Spatial Interpolation for Current Hour AQI
+    logger.info("4. Running Inverse Distance Weighting (IDW) spatial interpolation...")
+    current_aqis = np.array(idw_interpolation(target_points, station_points, power=2.0), dtype=float)
+    city_mean_current = float(np.mean(current_aqis))
+    logger.info(f"IDW spatial range: Min={np.min(current_aqis):.1f}, Max={np.max(current_aqis):.1f}, Mean={city_mean_current:.1f}")
+
+    # 5. Continuous Self-Correction & Adaptive Recalibration Loop
+    logger.info("5. Executing Adaptive Self-Correction & Error Recalibration Loop...")
+    cal_engine = AdaptiveCalibrationEngine()
+    eval_result = cal_engine.evaluate_ground_truth(now_iso, city_mean_current)
+    calibration_metrics = cal_engine.get_metrics_summary()
+    logger.info(f"Calibration metrics: Rolling Accuracy = {calibration_metrics['forecast_accuracy_pct']}%, MBE = {calibration_metrics['mean_bias_error']:+.2f}")
+
+    # Compute forward feedback correction vector across 72h horizon
     num_hours = min(72, len(forecast_times))
+    correction_vector = cal_engine.get_forward_correction_vector(num_hours)
+
+    # 6. Load Pre-Trained XGBoost AQI Model
+    logger.info("6. Loading pre-trained XGBoost model artifact...")
+    if not os.path.exists(MODEL_OUTPUT_PATH):
+        logger.warning(f"Model {MODEL_OUTPUT_PATH} not found. Training model now...")
+        model = train_aqi_model()
+    else:
+        model = xgb.XGBRegressor()
+        model.load_model(MODEL_OUTPUT_PATH)
+        logger.info(f"Loaded XGBoost model from {MODEL_OUTPUT_PATH}")
+
+    # 7. Pre-calculate zone average AQI for Gemini advisories
+    zone_aqi_map = {}
+    zone_count_map = {}
+    for hex_data, cur_aqi in zip(grid, current_aqis):
+        z_name = hex_data["zone_name"]
+        zone_aqi_map[z_name] = zone_aqi_map.get(z_name, 0.0) + cur_aqi
+        zone_count_map[z_name] = zone_count_map.get(z_name, 0) + 1
+
+    zone_avg_aqi = {z: zone_aqi_map[z] / max(1, zone_count_map[z]) for z in zone_aqi_map}
+
+    # 8. Generate Gemini AI Multilingual Advisories for 12 Municipal Zones
+    logger.info("8. Generating Gemini AI health advisories for municipal zones...")
+    zones_input = {}
+    for z_name, avg_val in zone_avg_aqi.items():
+        zones_input[z_name] = {
+            "current_aqi": avg_val,
+            "dominant_source": "Vehicular Traffic" if avg_val < 150 else "Industrial & Vehicular Emissions"
+        }
+
+    advisories = generate_gemini_advisories(zones_input)
+
+    # 9. Autoregressive 72-Hour Forward Forecasting with Adaptive Feedback
+    logger.info(f"9. Running calibrated 72-hour forward forecasting across {n_hex} spatial hexagons...")
     forecast_matrix = np.zeros((n_hex, num_hours), dtype=float)
     forecast_matrix[:, 0] = current_aqis
 
-    # We evaluate regional meteorological response curve over 72 hours
-    # and modulate each hexagon's microclimate baseline with atmospheric physics
-    city_mean_base = float(np.mean(current_aqis))
-
-    # Evaluate baseline XGBoost response at t=0
-    base_t0_dict = {
-        "aqi_lag_1h": [city_mean_base],
-        "aqi_lag_3h": [city_mean_base],
-        "aqi_lag_24h": [city_mean_base],
-        "temperature_2m": [temps[0] if temps else 25.0],
-        "relative_humidity_2m": [rhs[0] if rhs else 55.0],
-        "wind_speed_10m": [ws[0] if ws else 6.0],
-        "wind_direction_10m": [wdirs[0] if wdirs else 280.0],
-        "wind_u": [u_winds[0] if u_winds else -5.0],
-        "wind_v": [v_winds[0] if v_winds else 2.0],
-        "surface_pressure": [pressures[0] if pressures else 1008.0],
-        "boundary_layer_height": [blhs[0] if blhs else 500.0],
-        "inversion_factor": [1000.0 / max(100.0, blhs[0] if blhs else 500.0)],
-        "hour": [now_dt.hour],
-        "dayofweek": [now_dt.weekday()],
-        "month": [now_dt.month],
-        "hour_sin": [np.sin(2 * np.pi * now_dt.hour / 24.0)],
-        "hour_cos": [np.cos(2 * np.pi * now_dt.hour / 24.0)],
-        "doy_sin": [np.sin(2 * np.pi * now_dt.timetuple().tm_yday / 365.25)],
-        "doy_cos": [np.cos(2 * np.pi * now_dt.timetuple().tm_yday / 365.25)],
-    }
-    pred_t0 = float(model.predict(pd.DataFrame(base_t0_dict)[FEATURE_COLUMNS])[0])
+    # We evaluate forward atmospheric trajectory per zone/hexagon autoregressively
+    # Build initial lag buffers for each hexagon
+    hex_lags_1h = current_aqis.copy()
+    hex_lags_2h = current_aqis.copy()
+    hex_lags_3h = current_aqis.copy()
+    hex_lags_24h = current_aqis.copy()
 
     for h in range(1, num_hours):
         t_hour = (now_dt.hour + h) % 24
@@ -183,47 +184,59 @@ def run_pipeline() -> dict:
         blh_h = blhs[h_idx]
         inv_fac = 1000.0 / max(100.0, blh_h)
 
-        # Regional atmospheric response
-        step_dict = {
-            "aqi_lag_1h": [city_mean_base],
-            "aqi_lag_3h": [city_mean_base],
-            "aqi_lag_24h": [city_mean_base],
-            "temperature_2m": [temp_h],
-            "relative_humidity_2m": [rh_h],
-            "wind_speed_10m": [ws_h],
-            "wind_direction_10m": [wdir_h],
-            "wind_u": [u_h],
-            "wind_v": [v_h],
-            "surface_pressure": [press_h],
-            "boundary_layer_height": [blh_h],
-            "inversion_factor": [inv_fac],
-            "hour": [t_hour],
-            "dayofweek": [t_dow],
-            "month": [t_month],
-            "hour_sin": [np.sin(2 * np.pi * t_hour / 24.0)],
-            "hour_cos": [np.cos(2 * np.pi * t_hour / 24.0)],
-            "doy_sin": [np.sin(2 * np.pi * t_doy / 365.25)],
-            "doy_cos": [np.cos(2 * np.pi * t_doy / 365.25)],
-        }
-        pred_th = float(model.predict(pd.DataFrame(step_dict)[FEATURE_COLUMNS])[0])
+        h_sin = np.sin(2 * np.pi * t_hour / 24.0)
+        h_cos = np.cos(2 * np.pi * t_hour / 24.0)
+        d_sin = np.sin(2 * np.pi * t_doy / 365.25)
+        d_cos = np.cos(2 * np.pi * t_doy / 365.25)
 
-        # Dynamic atmospheric scaling ratio
-        meteo_scale_factor = float(np.clip(pred_th / max(50.0, pred_t0), 0.75, 1.35))
+        # Vectorized batch prediction for all hexagons at step h
+        batch_df = pd.DataFrame({
+            "aqi_lag_1h": hex_lags_1h,
+            "aqi_lag_2h": hex_lags_2h,
+            "aqi_lag_3h": hex_lags_3h,
+            "aqi_lag_24h": hex_lags_24h,
+            "station_base": current_aqis, # Microclimate anchor
+            "temperature_2m": temp_h,
+            "relative_humidity_2m": rh_h,
+            "wind_speed_10m": ws_h,
+            "wind_direction_10m": wdir_h,
+            "wind_u": u_h,
+            "wind_v": v_h,
+            "surface_pressure": press_h,
+            "boundary_layer_height": blh_h,
+            "inversion_factor": inv_fac,
+            "hour": t_hour,
+            "dayofweek": t_dow,
+            "month": t_month,
+            "hour_sin": h_sin,
+            "hour_cos": h_cos,
+            "doy_sin": d_sin,
+            "doy_cos": d_cos,
+        })
 
-        # Local Diurnal rush hour modulation (adds micro-variance for morning/evening)
-        rush_mod = 1.0 + (0.08 if (8 <= t_hour <= 11 or 18 <= t_hour <= 21) else -0.05 if (1 <= t_hour <= 5) else 0.0)
+        pred_batch = model.predict(batch_df[FEATURE_COLUMNS])
 
-        # Inversion modifier (night-time low boundary layer traps pollutants)
-        blh_mod = float(np.clip((600.0 / max(150.0, blh_h)) ** 0.3, 0.85, 1.25))
+        # Apply continuous adaptive error feedback compensation C_h
+        c_val = float(correction_vector[h])
+        adjusted_batch = pred_batch + c_val
 
-        # Combined modulation applied to each individual hexagon's initial baseline
-        for i in range(n_hex):
-            base_aqi_i = current_aqis[i]
-            val_h = base_aqi_i * meteo_scale_factor * rush_mod * blh_mod
-            # Smooth continuity decaying variance
-            forecast_matrix[i, h] = np.clip(val_h, 30.0, 420.0)
+        # Strict physical boundaries [20.0, 480.0]
+        bounded_batch = np.clip(adjusted_batch, 20.0, 480.0)
 
-    # 9. Assemble Hexagon Payloads with Refined Translucency & Source Attribution
+        # Store in forecast matrix
+        forecast_matrix[:, h] = np.round(bounded_batch, 1)
+
+        # Update autoregressive lag buffers
+        hex_lags_24h = hex_lags_3h.copy() if h >= 24 else current_aqis.copy()
+        hex_lags_3h = hex_lags_2h.copy()
+        hex_lags_2h = hex_lags_1h.copy()
+        hex_lags_1h = bounded_batch.copy()
+
+    # 10. Register Issued Forward Forecast with Adaptive Calibration Engine
+    city_forecast_series = [float(np.mean(forecast_matrix[:, h])) for h in range(num_hours)]
+    cal_engine.register_forecast(forecast_times[:num_hours], city_forecast_series, now_dt)
+
+    # 11. Assemble Hexagon Payloads with Source Attribution & Translucent Color
     hexagons_payload = []
     total_nct_aqi = 0.0
 
@@ -265,39 +278,35 @@ def run_pipeline() -> dict:
     avg_nct_aqi = round(float(total_nct_aqi / max(1, n_hex)), 1)
     nct_category = get_category_name(avg_nct_aqi)
 
-    # 10. Build Master Grid Payload
+    # 12. Build Master Grid Payload
     zones_summary = {}
     for z_name, avg_val in zone_avg_aqi.items():
         adv = advisories.get(z_name, {"en": "", "hi": ""})
         zones_summary[z_name] = {
             "current_aqi": round(avg_val),
             "category": get_category_name(avg_val),
-            "dominant_source": "Vehicular Traffic" if avg_val < 180 else "Industrial & Vehicular Emissions",
+            "dominant_source": "Vehicular Traffic" if avg_val < 150 else "Industrial & Vehicular Emissions",
             "advisory_en": adv.get("en", ""),
             "advisory_hi": adv.get("hi", "")
         }
 
     full_payload = {
-        "timestamp": now_dt.isoformat(),
+        "timestamp": now_iso,
         "generated_at": now_dt.strftime("%Y-%m-%d %H:%M:%S IST"),
         "nct_average_aqi": avg_nct_aqi,
         "nct_category": nct_category,
         "dominant_pollutant": "PM2.5",
         "active_stations_count": len(station_points),
         "total_hexagons": len(hexagons_payload),
+        "telemetry_health": telemetry_health,
+        "calibration_metrics": calibration_metrics,
         "forecast_timestamps": forecast_times[:num_hours],
-        "weather_summary": {
-            "temp": temps[0] if temps else 25.0,
-            "humidity": rhs[0] if rhs else 55.0,
-            "wind_speed": ws[0] if ws else 6.0,
-            "wind_dir": wdirs[0] if wdirs else 280.0,
-            "blh": blhs[0] if blhs else 450.0
-        },
+        "weather_summary": weather_summary,
         "zones_summary": zones_summary,
         "hexagons": hexagons_payload
     }
 
-    # 11. Write to static JSON files
+    # 13. Export Static Snapshots
     os.makedirs(os.path.dirname(FRONTEND_DATA_OUTPUT), exist_ok=True)
     os.makedirs(os.path.dirname(BACKEND_DATA_OUTPUT), exist_ok=True)
 
@@ -311,6 +320,8 @@ def run_pipeline() -> dict:
     logger.info("=" * 60)
     logger.info(f"PIPELINE COMPLETE: Exported {len(hexagons_payload)} hexagons to {FRONTEND_DATA_OUTPUT} ({file_size_kb:.1f} KB)")
     logger.info(f"NCT Delhi Average AQI: {avg_nct_aqi} ({nct_category})")
+    logger.info(f"Telemetry Status: {telemetry_health.get('source')} (Stale: {telemetry_health.get('is_stale')})")
+    logger.info(f"Forecast Accuracy: {calibration_metrics['forecast_accuracy_pct']}% | MBE: {calibration_metrics['mean_bias_error']:+.2f}")
     logger.info("=" * 60)
 
     return full_payload

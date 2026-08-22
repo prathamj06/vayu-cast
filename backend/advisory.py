@@ -74,14 +74,57 @@ def get_fallback_advisories(zone_name: str, aqi: float) -> Tuple[str, str]:
         )
 
 
+def _generate_single_zone_advisory(client, zone_name: str, avg_aqi: float, dom_source: str) -> Tuple[str, str]:
+    if client is not None:
+        try:
+            prompt = (
+                f"You are the official Delhi Air Quality Health Officer. "
+                f"Zone: '{zone_name}', Current AQI: {round(avg_aqi)}, Dominant Pollution: {dom_source}. "
+                f"Generate a concise, authoritative 1-2 sentence public health advisory in English, "
+                f"and its formal Hindi (Devanagari) counterpart. "
+                f"Format strictly as:\n"
+                f"EN: <English Advisory>\n"
+                f"HI: <Hindi Advisory>"
+            )
+
+            text = ""
+            for model_candidate in ["gemini-flash-latest", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-flash-lite-latest"]:
+                try:
+                    response = client.models.generate_content(
+                        model=model_candidate,
+                        contents=prompt
+                    )
+                    if response and response.text:
+                        text = response.text.strip()
+                        break
+                except Exception:
+                    continue
+
+            en_adv = ""
+            hi_adv = ""
+            if text:
+                for line in text.split("\n"):
+                    if line.startswith("EN:"):
+                        en_adv = line.replace("EN:", "").strip()
+                    elif line.startswith("HI:"):
+                        hi_adv = line.replace("HI:", "").strip()
+
+            if en_adv and hi_adv:
+                return en_adv, hi_adv
+
+        except Exception as e:
+            logger.debug(f"Gemini error for zone {zone_name}: {e}. Falling back.")
+
+    return get_fallback_advisories(zone_name, avg_aqi)
+
+
 def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
     """
-    Calls Google Gemini API for each municipal zone with a mandatory 2-second rate-limiting delay.
+    Generates bilingual health advisories for municipal zones using Google Gemini
+    with parallel execution and automatic domain fallback.
     Returns: { zone_name: { "en": "...", "hi": "..." } }
     """
     client = None
-    advisories = {}
-
     if GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
         try:
             from google import genai
@@ -90,59 +133,21 @@ def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[st
         except Exception as e:
             logger.warning(f"Could not initialize Google GenAI SDK: {e}. Using calibrated fallback generator.")
 
-    for zone_name, data in zones_data.items():
+    advisories = {}
+    from concurrent.futures import ThreadPoolExecutor
+
+    def process_zone(z_name, data):
         avg_aqi = data.get("current_aqi", 150)
         dom_source = data.get("dominant_source", "Vehicular Traffic")
+        en, hi = _generate_single_zone_advisory(client, z_name, avg_aqi, dom_source)
+        return z_name, {"en": en, "hi": hi}
 
-        if client is not None:
-            try:
-                prompt = (
-                    f"You are the official Delhi Air Quality Health Officer. "
-                    f"Zone: '{zone_name}', Current AQI: {round(avg_aqi)}, Dominant Pollution: {dom_source}. "
-                    f"Generate a concise, authoritative 1-2 sentence public health advisory in English, "
-                    f"and its formal Hindi (Devanagari) counterpart. "
-                    f"Format strictly as:\n"
-                    f"EN: <English Advisory>\n"
-                    f"HI: <Hindi Advisory>"
-                )
-
-                text = ""
-                for model_candidate in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
-                    try:
-                        response = client.models.generate_content(
-                            model=model_candidate,
-                            contents=prompt
-                        )
-                        if response and response.text:
-                            text = response.text.strip()
-                            break
-                    except Exception:
-                        continue
-
-                en_adv = ""
-                hi_adv = ""
-                if text:
-                    for line in text.split("\n"):
-                        if line.startswith("EN:"):
-                            en_adv = line.replace("EN:", "").strip()
-                        elif line.startswith("HI:"):
-                            hi_adv = line.replace("HI:", "").strip()
-
-                if not en_adv or not hi_adv:
-                    en_adv, hi_adv = get_fallback_advisories(zone_name, avg_aqi)
-
-                advisories[zone_name] = {"en": en_adv, "hi": hi_adv}
-                logger.info(f"Generated advisory for {zone_name} (AQI {round(avg_aqi)})")
-                time.sleep(2.0)
-
-            except Exception as e:
-                logger.error(f"Gemini generation error for zone {zone_name}: {e}. Falling back.")
-                en_adv, hi_adv = get_fallback_advisories(zone_name, avg_aqi)
-                advisories[zone_name] = {"en": en_adv, "hi": hi_adv}
-                time.sleep(1.0)
-        else:
-            en_adv, hi_adv = get_fallback_advisories(zone_name, avg_aqi)
-            advisories[zone_name] = {"en": en_adv, "hi": hi_adv}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(process_zone, z_name, data) for z_name, data in zones_data.items()]
+        for f in futures:
+            z_name, adv_dict = f.result()
+            advisories[z_name] = adv_dict
+            logger.info(f"Generated advisory for {z_name}")
 
     return advisories
 
