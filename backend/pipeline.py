@@ -236,8 +236,11 @@ def run_pipeline() -> dict:
         # Strict physical boundaries [20.0, 480.0]
         bounded_batch = np.clip(adjusted_batch, 20.0, 480.0)
 
-        # Store in forecast matrix
-        forecast_matrix[:, h] = np.round(bounded_batch, 1)
+        # Hour 0 is strictly anchored to live measured ground truth IDW; forward steps use XGBoost
+        if h == 0:
+            forecast_matrix[:, 0] = np.round(current_aqis, 1)
+        else:
+            forecast_matrix[:, h] = np.round(bounded_batch, 1)
 
         # Update autoregressive lag buffers
         hex_lags_24h = hex_lags_3h.copy() if h >= 24 else current_aqis.copy()
