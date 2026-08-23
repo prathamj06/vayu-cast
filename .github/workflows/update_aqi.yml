@@ -45,17 +45,33 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
           # Stage the freshly generated JSON snapshot in a temporary directory
-          mkdir -p /tmp/vayu_export
+          mkdir -p /tmp/vayu_export/frontend/public/data
           cp frontend/public/data/delhi_current_grid.json /tmp/vayu_export/
+          cp frontend/public/data/delhi_current_grid.json /tmp/vayu_export/frontend/public/data/
           
-          # Create/switch to an isolated orphan 'data' branch (zero historical bloat)
+          # Create a lightweight no-op frontend package so Vercel preview builds succeed cleanly
+          cat << 'EOF' > /tmp/vayu_export/frontend/package.json
+          {
+            "name": "vayucast-data-feed",
+            "version": "1.0.0",
+            "private": true,
+            "scripts": {
+              "build": "echo 'Data branch preview build skipped' && exit 0"
+            }
+          }
+          EOF
+          
+          # Switch to isolated orphan 'data' branch (zero historical bloat)
           git checkout --orphan data
           git rm -rf .
           
-          # Place the single data snapshot file at the root of the data branch
+          # Place the single data snapshot files and dummy frontend
           cp /tmp/vayu_export/delhi_current_grid.json ./
+          mkdir -p frontend/public/data
+          cp /tmp/vayu_export/frontend/public/data/delhi_current_grid.json ./frontend/public/data/
+          cp /tmp/vayu_export/frontend/package.json ./frontend/package.json
           
-          git add delhi_current_grid.json
+          git add .
           git commit -m "chore(data): live hourly AQI grid snapshot [skip ci]"
           
           # Force push to overwrite previous data commit (guarantees exactly 1 commit forever)
