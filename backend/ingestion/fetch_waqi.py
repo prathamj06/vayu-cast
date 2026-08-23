@@ -1,7 +1,7 @@
 """
 VAYU - Real-Time Telemetry Ingestion & CPCB Station Synchronizer
 Directly ingests live CPCB / DPCC station telemetry via concurrent WAQI individual feeds
-and OpenAQ API across NCT Delhi, with dynamic meteorology-grounded fallback for offline sensors.
+with strict timestamp freshness validation (>48h stale rejection) and dynamic meteorology-grounded fallback.
 """
 
 import os
@@ -43,7 +43,7 @@ DELHI_STATIONS = [
     {"slug": "bawana", "name": "Bawana Industrial Area, Delhi", "lat": 28.7762, "lon": 77.0511, "base_aqi": 175},
     {"slug": "dwarka-sector-8", "name": "Dwarka Sector 8, Delhi", "lat": 28.5823, "lon": 77.0500, "base_aqi": 125},
     {"slug": "dite-okhla", "name": "DITE Okhla Phase 2, Delhi", "lat": 28.5300, "lon": 77.2800, "base_aqi": 150},
-    {"slug": "sri-auribindo-marg", "name": "Sri Aurobindo Marg (Hauz Khas)", "lat": 28.5313, "lon": 77.1901, "base_aqi": 105},
+    {"slug": "sri-auribindo-marg", "name": "Sri Aurobindo Marg (Hauz Khas)", "lat": 28.5283, "lon": 77.1893, "base_aqi": 85},
     {"slug": "igi-airport-t3", "name": "IGI Airport T3, Delhi", "lat": 28.5562, "lon": 77.1000, "base_aqi": 115},
     {"slug": "lodhi-road", "name": "Lodhi Road, Delhi", "lat": 28.5880, "lon": 77.2210, "base_aqi": 85},
     {"slug": "north-campus-du", "name": "North Campus DU, Delhi", "lat": 28.6900, "lon": 77.2100, "base_aqi": 120},
@@ -51,14 +51,14 @@ DELHI_STATIONS = [
     {"slug": "sirifort", "name": "Sirifort, Delhi", "lat": 28.5504, "lon": 77.2159, "base_aqi": 90},
     {"slug": "vivek-vihar", "name": "Vivek Vihar, Delhi", "lat": 28.6720, "lon": 77.3150, "base_aqi": 150},
     {"slug": "mundka", "name": "Mundka, Delhi", "lat": 28.6847, "lon": 77.0299, "base_aqi": 175},
-    {"slug": "bramprakash-ayurvedic-hospital--najafgarh", "name": "Najafgarh, Delhi", "lat": 28.6090, "lon": 76.9790, "base_aqi": 120},
-    {"slug": "alipur", "name": "Alipur, Delhi", "lat": 28.7971, "lon": 77.1331, "base_aqi": 150},
+    {"slug": "bramprakash-ayurvedic-hospital--najafgarh", "name": "Najafgarh, Delhi", "lat": 28.5727, "lon": 76.9334, "base_aqi": 85},
+    {"slug": "alipur", "name": "Alipur, Delhi", "lat": 28.8160, "lon": 77.1520, "base_aqi": 75},
     {"slug": "burari-crossing", "name": "Burari Crossing, Delhi", "lat": 28.7256, "lon": 77.2012, "base_aqi": 155},
     {"slug": "nehru-nagar", "name": "Nehru Nagar, Delhi", "lat": 28.5678, "lon": 77.2505, "base_aqi": 130},
     {"slug": "chandni-chowk", "name": "Chandni Chowk, Delhi", "lat": 28.6562, "lon": 77.2300, "base_aqi": 140},
-    {"slug": "ito", "name": "ITO Junction, Delhi", "lat": 28.6315, "lon": 77.2488, "base_aqi": 150},
-    {"slug": "aya-nagar", "name": "Aya Nagar, Delhi", "lat": 28.4700, "lon": 77.1100, "base_aqi": 75},
-    {"slug": "dr.-karni-singh-shooting-range", "name": "Dr. Karni Singh Range, Delhi", "lat": 28.4986, "lon": 77.2648, "base_aqi": 80},
+    {"slug": "ito", "name": "ITO Junction, Delhi", "lat": 28.6290, "lon": 77.2410, "base_aqi": 150},
+    {"slug": "aya-nagar", "name": "Aya Nagar, Delhi", "lat": 28.4830, "lon": 77.1270, "base_aqi": 80},
+    {"slug": "dr.-karni-singh-shooting-range", "name": "Dr. Karni Singh Range, Delhi", "lat": 28.4997, "lon": 77.2671, "base_aqi": 85},
 ]
 
 _latest_telemetry_status: Dict[str, Any] = {
@@ -70,8 +70,31 @@ _latest_telemetry_status: Dict[str, Any] = {
 }
 
 
+def parse_feed_timestamp(st_data: Dict[str, Any]) -> Optional[datetime.datetime]:
+    """Extracts and parses measurement timestamp from WAQI station feed object."""
+    t_obj = st_data.get("time", {})
+    if isinstance(t_obj, dict):
+        iso_str = t_obj.get("iso")
+        if iso_str:
+            try:
+                return datetime.datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        s_str = t_obj.get("s")
+        if s_str:
+            try:
+                dt = datetime.datetime.strptime(s_str, "%Y-%m-%d %H:%M:%S")
+                return dt.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+            except Exception:
+                pass
+    return None
+
+
 def fetch_single_station_waqi(station: Dict[str, Any]) -> Optional[Tuple[float, float, float]]:
-    """Fetches real-time AQI for a single CPCB station from WAQI individual feed."""
+    """
+    Fetches real-time AQI for a single CPCB station from WAQI individual feed.
+    Enforces strict timestamp freshness validation (>48h stale rejection).
+    """
     slug = station["slug"]
     fallback_lat = station["lat"]
     fallback_lon = station["lon"]
@@ -86,9 +109,21 @@ def fetch_single_station_waqi(station: Dict[str, Any]) -> Optional[Tuple[float, 
             json_res = resp.json()
             if json_res.get("status") == "ok" and isinstance(json_res.get("data"), dict):
                 st_data = json_res["data"]
+
+                # 1. Strict Timestamp Freshness Guard: Discard zombie/historical feeds older than 48h
+                feed_dt = parse_feed_timestamp(st_data)
+                now_ist = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+                if feed_dt is None:
+                    logger.warning(f"Rejected {station['name']}: Missing timestamp in feed.")
+                    return None
+
+                age_hours = (now_ist - feed_dt).total_seconds() / 3600.0
+                if age_hours > 48.0 or age_hours < -2.0:
+                    logger.warning(f"Rejected {station['name']}: Stale historical feed (Age: {age_hours:.1f}h, Timestamp: {feed_dt}).")
+                    return None
+
+                # 2. Extract AQI value
                 raw_aqi = st_data.get("aqi")
-                
-                # Check for direct PM2.5 measurement in iaqi if aqi is missing
                 if raw_aqi is None or raw_aqi == "-" or raw_aqi == "":
                     iaqi = st_data.get("iaqi", {})
                     if isinstance(iaqi, dict) and "pm25" in iaqi:
@@ -101,7 +136,7 @@ def fetch_single_station_waqi(station: Dict[str, Any]) -> Optional[Tuple[float, 
                             geo = st_data.get("city", {}).get("geo", [])
                             lat = float(geo[0]) if (isinstance(geo, list) and len(geo) == 2) else fallback_lat
                             lon = float(geo[1]) if (isinstance(geo, list) and len(geo) == 2) else fallback_lon
-                            logger.info(f"Ingested live reading for {station['name']}: {aqi_val} AQI at ({lat:.3f}, {lon:.3f})")
+                            logger.info(f"Ingested verified fresh reading for {station['name']}: {aqi_val} AQI at ({lat:.3f}, {lon:.3f})")
                             return (lat, lon, aqi_val)
                     except (ValueError, TypeError):
                         pass
@@ -114,13 +149,14 @@ def fetch_single_station_waqi(station: Dict[str, Any]) -> Optional[Tuple[float, 
 def fetch_live_waqi_telemetry(weather_summary: Optional[Dict[str, float]] = None) -> List[Tuple[float, float, float]]:
     """
     Ingests live CPCB station telemetry concurrently across Delhi.
-    Seamlessly merges active ground feeds with calibrated localized baselines.
+    Guarantees that all feeds are fresh, actively reporting sensors.
+    Seamlessly merges active ground feeds with calibrated localized baselines for offline stations.
     """
     global _latest_telemetry_status
     live_points: List[Tuple[float, float, float]] = []
     now_dt = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
 
-    # 1. Concurrent Ingestion across all Delhi CPCB Station Feeds
+    # 1. Concurrent Ingestion across all Delhi CPCB Station Feeds with Freshness Validation
     if WAQI_API_TOKEN and WAQI_API_TOKEN != "your_waqi_api_token_here":
         logger.info(f"Querying {len(DELHI_STATIONS)} Delhi CPCB station feeds concurrently via WAQI API...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
@@ -130,7 +166,7 @@ def fetch_live_waqi_telemetry(weather_summary: Optional[Dict[str, float]] = None
                 if res is not None:
                     live_points.append(res)
 
-        logger.info(f"Successfully ingested {len(live_points)} active CPCB station feeds.")
+        logger.info(f"Successfully ingested {len(live_points)} verified fresh CPCB station feeds.")
 
     # 2. Check if we have sufficient live ground stations
     if len(live_points) >= 6:
