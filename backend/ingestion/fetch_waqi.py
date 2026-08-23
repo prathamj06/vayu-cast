@@ -22,34 +22,36 @@ logger = logging.getLogger(__name__)
 WAQI_API_TOKEN = os.getenv("WAQI_API_TOKEN", "")
 OPENAQ_API_KEY = os.getenv("OPENAQ_API_KEY", "")
 
-# Official Delhi CPCB/DPCC Station Slugs & Reference Baselines
+# Verified Delhi CPCB/DPCC Station Slugs in WAQI Database
 DELHI_STATIONS = [
+    {"slug": "dtu", "name": "Delhi Technological University (DTU), Shahbad", "lat": 28.7500, "lon": 77.1170, "base_aqi": 165},
     {"slug": "anand-vihar", "name": "Anand Vihar, Delhi", "lat": 28.6469, "lon": 77.3160, "base_aqi": 185},
+    {"slug": "pgdav-college--sriniwaspuri", "name": "PGDAV College, Sriniwaspuri", "lat": 28.5668, "lon": 77.2514, "base_aqi": 155},
+    {"slug": "iti-jahangirpuri", "name": "ITI Jahangirpuri, Delhi", "lat": 28.7330, "lon": 77.1719, "base_aqi": 165},
+    {"slug": "delhi-institute-of-tool-engineering--wazirpur", "name": "DITE Wazirpur Industrial Area", "lat": 28.7005, "lon": 77.1656, "base_aqi": 160},
+    {"slug": "satyawati-college", "name": "Satyawati College, Ashok Vihar", "lat": 28.6957, "lon": 77.1812, "base_aqi": 140},
     {"slug": "punjabi-bagh", "name": "Punjabi Bagh, Delhi", "lat": 28.6720, "lon": 77.1310, "base_aqi": 135},
-    {"slug": "r-k-puram", "name": "R K Puram, Delhi", "lat": 28.5630, "lon": 77.1860, "base_aqi": 115},
-    {"slug": "mandir-marg", "name": "Mandir Marg, Delhi", "lat": 28.6360, "lon": 77.2010, "base_aqi": 110},
-    {"slug": "jahangirpuri", "name": "Jahangirpuri, Delhi", "lat": 28.7328, "lon": 77.1706, "base_aqi": 175},
-    {"slug": "rohini", "name": "Rohini Sector 16, Delhi", "lat": 28.7495, "lon": 77.0565, "base_aqi": 145},
+    {"slug": "r.k.-puram", "name": "R.K. Puram, Delhi", "lat": 28.5648, "lon": 77.1744, "base_aqi": 120},
+    {"slug": "mandir-marg", "name": "Mandir Marg, Delhi", "lat": 28.6341, "lon": 77.2005, "base_aqi": 115},
+    {"slug": "pusa", "name": "Pusa Campus, Delhi", "lat": 28.6369, "lon": 77.1722, "base_aqi": 110},
+    {"slug": "jawaharlal-nehru-stadium", "name": "Jawaharlal Nehru Stadium, Delhi", "lat": 28.5828, "lon": 77.2343, "base_aqi": 100},
+    {"slug": "mother-dairy-plant--parparganj", "name": "Mother Dairy, Patparganj", "lat": 28.6201, "lon": 77.2877, "base_aqi": 135},
+    {"slug": "sonia-vihar-water-treatment-plant-djb", "name": "Sonia Vihar Water Treatment Plant", "lat": 28.7100, "lon": 77.2462, "base_aqi": 125},
+    {"slug": "major-dhyan-chand-national-stadium", "name": "Major Dhyan Chand Stadium, Delhi", "lat": 28.6124, "lon": 77.2373, "base_aqi": 95},
+    {"slug": "iti-shahdra--jhilmil-industrial-area", "name": "ITI Shahdara, Jhilmil Industrial Area", "lat": 28.6721, "lon": 77.3138, "base_aqi": 145},
+    {"slug": "narela", "name": "Narela Industrial Area, Delhi", "lat": 28.8206, "lon": 77.1010, "base_aqi": 160},
+    {"slug": "bawana", "name": "Bawana Industrial Area, Delhi", "lat": 28.7762, "lon": 77.0511, "base_aqi": 175},
     {"slug": "dwarka-sector-8", "name": "Dwarka Sector 8, Delhi", "lat": 28.5823, "lon": 77.0500, "base_aqi": 125},
-    {"slug": "okhla-phase-2", "name": "Okhla Phase 2, Delhi", "lat": 28.5300, "lon": 77.2800, "base_aqi": 150},
-    {"slug": "bawana", "name": "Bawana Industrial Area, Delhi", "lat": 28.7762, "lon": 77.0511, "base_aqi": 180},
-    {"slug": "narela", "name": "Narela Industrial Area, Delhi", "lat": 28.8500, "lon": 77.0900, "base_aqi": 170},
-    {"slug": "wazirpur", "name": "Wazirpur Industrial Area, Delhi", "lat": 28.6998, "lon": 77.1654, "base_aqi": 165},
-    {"slug": "sonia-vihar", "name": "Sonia Vihar, Delhi", "lat": 28.7105, "lon": 77.2494, "base_aqi": 130},
-    {"slug": "patparganj", "name": "Patparganj, Delhi", "lat": 28.6237, "lon": 77.2872, "base_aqi": 135},
-    {"slug": "ashok-vihar", "name": "Ashok Vihar, Delhi", "lat": 28.6954, "lon": 77.1817, "base_aqi": 140},
-    {"slug": "major-dhyan-chand-national-stadium", "name": "Major Dhyan Chand Stadium, Delhi", "lat": 28.6120, "lon": 77.2370, "base_aqi": 95},
-    {"slug": "jawaharlal-nehru-stadium", "name": "Jawaharlal Nehru Stadium, Delhi", "lat": 28.5802, "lon": 77.2338, "base_aqi": 100},
-    {"slug": "sri-aurobindo-marg", "name": "Sri Aurobindo Marg, Delhi", "lat": 28.5313, "lon": 77.1901, "base_aqi": 105},
+    {"slug": "dite-okhla", "name": "DITE Okhla Phase 2, Delhi", "lat": 28.5300, "lon": 77.2800, "base_aqi": 150},
+    {"slug": "sri-auribindo-marg", "name": "Sri Aurobindo Marg (Hauz Khas)", "lat": 28.5313, "lon": 77.1901, "base_aqi": 105},
     {"slug": "igi-airport-t3", "name": "IGI Airport T3, Delhi", "lat": 28.5562, "lon": 77.1000, "base_aqi": 115},
     {"slug": "lodhi-road", "name": "Lodhi Road, Delhi", "lat": 28.5880, "lon": 77.2210, "base_aqi": 85},
     {"slug": "north-campus-du", "name": "North Campus DU, Delhi", "lat": 28.6900, "lon": 77.2100, "base_aqi": 120},
-    {"slug": "pusa", "name": "Pusa Campus, Delhi", "lat": 28.6366, "lon": 77.1567, "base_aqi": 105},
     {"slug": "shadipur", "name": "Shadipur, Delhi", "lat": 28.6515, "lon": 77.1581, "base_aqi": 140},
     {"slug": "sirifort", "name": "Sirifort, Delhi", "lat": 28.5504, "lon": 77.2159, "base_aqi": 90},
     {"slug": "vivek-vihar", "name": "Vivek Vihar, Delhi", "lat": 28.6720, "lon": 77.3150, "base_aqi": 150},
     {"slug": "mundka", "name": "Mundka, Delhi", "lat": 28.6847, "lon": 77.0299, "base_aqi": 175},
-    {"slug": "najafgarh", "name": "Najafgarh, Delhi", "lat": 28.6090, "lon": 76.9790, "base_aqi": 120},
+    {"slug": "bramprakash-ayurvedic-hospital--najafgarh", "name": "Najafgarh, Delhi", "lat": 28.6090, "lon": 76.9790, "base_aqi": 120},
     {"slug": "alipur", "name": "Alipur, Delhi", "lat": 28.7971, "lon": 77.1331, "base_aqi": 150},
     {"slug": "burari-crossing", "name": "Burari Crossing, Delhi", "lat": 28.7256, "lon": 77.2012, "base_aqi": 155},
     {"slug": "nehru-nagar", "name": "Nehru Nagar, Delhi", "lat": 28.5678, "lon": 77.2505, "base_aqi": 130},
@@ -81,22 +83,28 @@ def fetch_single_station_waqi(station: Dict[str, Any]) -> Optional[Tuple[float, 
         url = f"https://api.waqi.info/feed/delhi/{slug}/?token={WAQI_API_TOKEN}"
         resp = requests.get(url, timeout=4)
         if resp.status_code == 200:
-            data = resp.json()
-            if data.get("status") == "ok":
-                st_data = data.get("data", {})
+            json_res = resp.json()
+            if json_res.get("status") == "ok" and isinstance(json_res.get("data"), dict):
+                st_data = json_res["data"]
                 raw_aqi = st_data.get("aqi")
                 
                 # Check for direct PM2.5 measurement in iaqi if aqi is missing
                 if raw_aqi is None or raw_aqi == "-" or raw_aqi == "":
-                    raw_aqi = st_data.get("iaqi", {}).get("pm25", {}).get("v")
+                    iaqi = st_data.get("iaqi", {})
+                    if isinstance(iaqi, dict) and "pm25" in iaqi:
+                        raw_aqi = iaqi["pm25"].get("v")
 
                 if raw_aqi is not None and raw_aqi != "-" and raw_aqi != "":
-                    aqi_val = float(raw_aqi)
-                    if 10.0 <= aqi_val <= 650.0:
-                        geo = st_data.get("city", {}).get("geo", [])
-                        lat = float(geo[0]) if len(geo) == 2 else fallback_lat
-                        lon = float(geo[1]) if len(geo) == 2 else fallback_lon
-                        return (lat, lon, aqi_val)
+                    try:
+                        aqi_val = float(raw_aqi)
+                        if 10.0 <= aqi_val <= 650.0:
+                            geo = st_data.get("city", {}).get("geo", [])
+                            lat = float(geo[0]) if (isinstance(geo, list) and len(geo) == 2) else fallback_lat
+                            lon = float(geo[1]) if (isinstance(geo, list) and len(geo) == 2) else fallback_lon
+                            logger.info(f"Ingested live reading for {station['name']}: {aqi_val} AQI at ({lat:.3f}, {lon:.3f})")
+                            return (lat, lon, aqi_val)
+                    except (ValueError, TypeError):
+                        pass
     except Exception:
         pass
 
@@ -115,7 +123,7 @@ def fetch_live_waqi_telemetry(weather_summary: Optional[Dict[str, float]] = None
     # 1. Concurrent Ingestion across all Delhi CPCB Station Feeds
     if WAQI_API_TOKEN and WAQI_API_TOKEN != "your_waqi_api_token_here":
         logger.info(f"Querying {len(DELHI_STATIONS)} Delhi CPCB station feeds concurrently via WAQI API...")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             future_to_st = {executor.submit(fetch_single_station_waqi, st): st for st in DELHI_STATIONS}
             for future in concurrent.futures.as_completed(future_to_st):
                 res = future.result()

@@ -126,7 +126,7 @@ def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[st
                 )
 
                 text = ""
-                for model_candidate in ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"]:
+                for model_candidate in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest"]:
                     try:
                         response = client.models.generate_content(
                             model=model_candidate,
@@ -136,7 +136,7 @@ def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[st
                             text = response.text.strip()
                             break
                     except Exception:
-                        continue
+                        pass
 
                 en_adv = ""
                 hi_adv = ""
@@ -152,13 +152,11 @@ def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[st
 
                 advisories[zone_name] = {"en": en_adv, "hi": hi_adv}
                 logger.info(f"Generated focused advisory for {zone_name}")
-                time.sleep(1.5)
 
             except Exception as e:
-                logger.error(f"Gemini generation error for zone {zone_name}: {e}. Falling back.")
+                logger.warning(f"Using focused fallback advisory for {zone_name}: {e}")
                 en_adv, hi_adv = get_focused_fallback_advisory(zone_name, avg_aqi)
                 advisories[zone_name] = {"en": en_adv, "hi": hi_adv}
-                time.sleep(1.0)
         else:
             en_adv, hi_adv = get_focused_fallback_advisory(zone_name, avg_aqi)
             advisories[zone_name] = {"en": en_adv, "hi": hi_adv}
