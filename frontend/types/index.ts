@@ -15,13 +15,14 @@ export interface HexagonData {
   advisory_en: string;
   advisory_hi: string;
   forecast_72h: number[]; // Array of 72 hourly AQI predicted integers
-  hourly_weather?: {
-    temp: number[];
-    humidity: number[];
-    wind_speed: number[];
-    wind_dir: number[];
-    blh: number[];
-  };
+}
+
+export interface HourlyWeatherMetric {
+  temp: number;
+  humidity: number;
+  wind_speed: number;
+  wind_dir: number;
+  blh: number;
 }
 
 export interface WeatherSummary {
@@ -30,6 +31,7 @@ export interface WeatherSummary {
   wind_speed: number;
   wind_dir: number;
   blh: number;
+  hourly?: HourlyWeatherMetric[];
 }
 
 export interface TelemetryHealth {

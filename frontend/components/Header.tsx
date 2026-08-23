@@ -7,6 +7,7 @@ import { getAQICategory } from '@/lib/aqi-utils';
 
 interface HeaderProps {
   data: GridPayload | null;
+  currentHour?: number;
   language: 'en' | 'hi';
   onLanguageToggle: () => void;
   selectedZone: string | null;
@@ -15,6 +16,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   data,
+  currentHour = 0,
   language,
   onLanguageToggle,
   selectedZone,
@@ -22,7 +24,10 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const avgAQI = data?.nct_average_aqi ?? 142;
   const category = getAQICategory(avgAQI);
-  const weather = data?.weather_summary;
+  
+  // Continuously dynamically resolves meteorological metrics for the current active forecast/live hour
+  const baseWeather = data?.weather_summary;
+  const activeWeather = baseWeather?.hourly?.[currentHour] || baseWeather;
 
   const zones = data?.zones_summary ? Object.keys(data.zones_summary) : [];
 
@@ -82,24 +87,24 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Atmospheric Telemetry & Interactive Controls */}
       <div className="flex items-center gap-2 pointer-events-auto flex-wrap justify-end">
-        {/* Live Weather Metrics */}
-        {weather && (
-          <div className="glass-panel px-3.5 py-2 rounded-2xl flex items-center gap-4 text-xs text-slate-300 hidden lg:flex border border-white/10">
+        {/* Dynamic Live Weather Metrics Synchronized with Timeline Hour */}
+        {activeWeather && (
+          <div className="glass-panel px-3.5 py-2 rounded-2xl flex items-center gap-4 text-xs text-slate-300 hidden lg:flex border border-white/10 transition-all duration-300">
             <div className="flex items-center gap-1.5" title="Surface Temperature">
               <Thermometer className="w-3.5 h-3.5 text-amber-400" />
-              <span className="tabular-nums font-semibold">{weather.temp}°C</span>
+              <span className="tabular-nums font-semibold">{activeWeather.temp}°C</span>
             </div>
             <div className="flex items-center gap-1.5" title="Relative Humidity">
               <Droplets className="w-3.5 h-3.5 text-blue-400" />
-              <span className="tabular-nums font-semibold">{weather.humidity}%</span>
+              <span className="tabular-nums font-semibold">{activeWeather.humidity}%</span>
             </div>
             <div className="flex items-center gap-1.5" title="Wind Velocity & Direction">
               <Compass className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="tabular-nums font-semibold">{weather.wind_speed} km/h ({weather.wind_dir}°)</span>
+              <span className="tabular-nums font-semibold">{activeWeather.wind_speed} km/h ({activeWeather.wind_dir}°)</span>
             </div>
             <div className="flex items-center gap-1.5" title="Atmospheric Boundary Layer Height">
               <Layers className="w-3.5 h-3.5 text-purple-400" />
-              <span className="tabular-nums font-semibold">BLH {weather.blh}m</span>
+              <span className="tabular-nums font-semibold">BLH {activeWeather.blh}m</span>
             </div>
           </div>
         )}

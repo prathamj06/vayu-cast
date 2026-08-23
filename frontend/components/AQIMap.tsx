@@ -73,6 +73,7 @@ interface AQIMapProps {
   hexagons: HexagonData[];
   currentHour: number;
   selectedHexagon: HexagonData | null;
+  selectedZone: string | null;
   onSelectHexagon: (hex: HexagonData) => void;
   language: 'en' | 'hi';
 }
@@ -81,6 +82,7 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
   hexagons,
   currentHour,
   selectedHexagon,
+  selectedZone,
   onSelectHexagon,
   language,
 }) => {
@@ -129,7 +131,48 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
     }
   };
 
-  // Construct Deck.gl H3 Hexagon Layer with Refined Translucency & Crisp Geography Visibility
+  // Fly to region centroid when a specific municipal zone is selected
+  useEffect(() => {
+    if (!selectedZone) {
+      setViewState((prev) => ({
+        ...prev,
+        latitude: INITIAL_VIEW_STATE.latitude,
+        longitude: INITIAL_VIEW_STATE.longitude,
+        zoom: INITIAL_VIEW_STATE.zoom,
+      }));
+      if (mapRef.current) {
+        mapRef.current.flyTo({
+          center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude],
+          zoom: INITIAL_VIEW_STATE.zoom,
+          duration: 700,
+        });
+      }
+      return;
+    }
+
+    const zoneHexes = hexagons.filter((h) => h.zone_name.toLowerCase() === selectedZone.toLowerCase());
+    if (zoneHexes.length > 0) {
+      const avgLat = zoneHexes.reduce((acc, h) => acc + h.centroid[0], 0) / zoneHexes.length;
+      const avgLon = zoneHexes.reduce((acc, h) => acc + h.centroid[1], 0) / zoneHexes.length;
+
+      setViewState((prev) => ({
+        ...prev,
+        latitude: avgLat,
+        longitude: avgLon,
+        zoom: 11.4,
+      }));
+
+      if (mapRef.current) {
+        mapRef.current.flyTo({
+          center: [avgLon, avgLat],
+          zoom: 11.4,
+          duration: 700,
+        });
+      }
+    }
+  }, [selectedZone, hexagons]);
+
+  // Construct Deck.gl H3 Hexagon Layer with Complete Region-Wide Highlighting
   const layers = useMemo(() => {
     return [
       new H3HexagonLayer<HexagonData>({
@@ -140,26 +183,45 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
         filled: true,
         extruded: false,
         getHexagon: (d) => d.hex_id,
-        // Refined translucent fill (alpha = 65 / ~25% opacity) so underlying streets & labels are fully legible
+        // Dynamic region fill styling:
+        // - Single selected hex: brightest (alpha = 160)
+        // - Constituent hexes of selectedZone: elevated (alpha = 115)
+        // - Unselected zones when a zone is active: dimmed (alpha = 30)
+        // - Normal state: translucent (alpha = 65)
         getFillColor: (d) => {
           const aqiVal = d.forecast_72h?.[currentHour] ?? d.aqi;
-          const isSelected = selectedHexagon?.hex_id === d.hex_id;
-          return getAQIRGB(aqiVal, isSelected ? 120 : 65);
+          const isHexSelected = selectedHexagon?.hex_id === d.hex_id;
+          const isZoneSelected = selectedZone && d.zone_name.toLowerCase() === selectedZone.toLowerCase();
+
+          if (isHexSelected) return getAQIRGB(aqiVal, 160);
+          if (isZoneSelected) return getAQIRGB(aqiVal, 115);
+          if (selectedZone && !isZoneSelected) return getAQIRGB(aqiVal, 28);
+          return getAQIRGB(aqiVal, 65);
         },
-        // Crisp, high-precision stroke for geographic boundaries
+        // Precise regional boundary stroke:
+        // - Selected hex: Pure white solid border
+        // - Selected zone constituent hexes: Glowing cyan border
+        // - Others: subtle grid edge
         getLineColor: (d) => {
           if (selectedHexagon?.hex_id === d.hex_id) {
-            return [255, 255, 255, 255]; // Pure white highlight on selection
+            return [255, 255, 255, 255]; // Pure white highlight on single hex selection
           }
-          return [255, 255, 255, 22];    // Subtle grid boundary
+          if (selectedZone && d.zone_name.toLowerCase() === selectedZone.toLowerCase()) {
+            return [56, 189, 248, 220];  // Vibrant cyan boundary for entire selected region
+          }
+          return [255, 255, 255, 20];     // Subtle grid boundary
         },
-        getLineWidth: (d) => (selectedHexagon?.hex_id === d.hex_id ? 2.5 : 0.8),
+        getLineWidth: (d) => {
+          if (selectedHexagon?.hex_id === d.hex_id) return 2.8;
+          if (selectedZone && d.zone_name.toLowerCase() === selectedZone.toLowerCase()) return 1.6;
+          return 0.7;
+        },
         lineWidthUnits: 'pixels',
         lineWidthMinPixels: 0.5,
         updateTriggers: {
-          getFillColor: [currentHour, selectedHexagon?.hex_id],
-          getLineColor: [selectedHexagon?.hex_id],
-          getLineWidth: [selectedHexagon?.hex_id],
+          getFillColor: [currentHour, selectedHexagon?.hex_id, selectedZone],
+          getLineColor: [selectedHexagon?.hex_id, selectedZone],
+          getLineWidth: [selectedHexagon?.hex_id, selectedZone],
         },
         onHover: (info) => {
           if (info.object) {
@@ -179,7 +241,7 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
         },
       }),
     ];
-  }, [hexagons, currentHour, selectedHexagon, onSelectHexagon]);
+  }, [hexagons, currentHour, selectedHexagon, selectedZone, onSelectHexagon]);
 
   return (
     <div className="relative w-full h-full select-none overflow-hidden bg-[#070a12]">
