@@ -71,7 +71,8 @@ def run_pipeline() -> dict:
     logger.info("STARTING CALIBRATED VAYU INGESTION & FORECASTING PIPELINE")
     logger.info("=" * 60)
 
-    now_dt = datetime.datetime.now()
+    IST_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    now_dt = datetime.datetime.now(IST_TZ)
     now_iso = now_dt.isoformat()
 
     # 1. Fetch 72-Hour Weather Forecast First (needed for meteorological baseline conditioning)
@@ -292,7 +293,7 @@ def run_pipeline() -> dict:
 
     full_payload = {
         "timestamp": now_iso,
-        "generated_at": now_dt.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "generated_at": now_dt.strftime("%d %b %Y, %I:%M %p IST"),
         "nct_average_aqi": avg_nct_aqi,
         "nct_category": nct_category,
         "dominant_pollutant": "PM2.5",
