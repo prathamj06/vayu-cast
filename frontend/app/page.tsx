@@ -27,21 +27,20 @@ export default function VayuDashboard() {
     async function loadGridData() {
       try {
         setLoading(true);
-        // Fetch static pre-compiled JSON directly from public folder or API route
-        const res = await fetch('/data/delhi_current_grid.json', {
-          headers: { 'Cache-Control': 'no-cache' }
-        });
+        // 1. Fetch from /api/grid (which resolves the latest single-commit data branch)
+        let res = await fetch('/api/grid');
         
         if (!res.ok) {
-          // Fallback to API route if direct public path encounters issues
-          const apiRes = await fetch('/api/grid');
-          if (!apiRes.ok) throw new Error('Failed to load Delhi AQI mesh data');
-          const jsonData = await apiRes.json();
-          setData(jsonData);
-        } else {
-          const jsonData = await res.json();
-          setData(jsonData);
+          // 2. Fallback to bundled public static JSON
+          res = await fetch('/data/delhi_current_grid.json');
         }
+
+        if (!res.ok) {
+          throw new Error('Failed to load Delhi AQI mesh data');
+        }
+
+        const jsonData = await res.json();
+        setData(jsonData);
       } catch (err: any) {
         console.error('Error fetching grid snapshot:', err);
         setError(err.message || 'Error loading air quality data');
