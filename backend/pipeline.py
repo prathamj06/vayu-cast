@@ -24,7 +24,7 @@ if project_root not in sys.path:
 from backend.ingestion.grid_builder import generate_delhi_h3_grid, idw_interpolation
 from backend.ingestion.fetch_waqi import fetch_live_waqi_telemetry, get_telemetry_status
 from backend.ingestion.fetch_weather import fetch_72h_weather_forecast
-from backend.advisory import generate_gemini_advisories, calculate_source_attribution
+from backend.advisory import generate_gemini_advisories, calculate_hyperlocal_source_attribution
 from backend.models.train_model import FEATURE_COLUMNS, train_aqi_model, MODEL_OUTPUT_PATH
 from backend.models.adaptive_calibration import AdaptiveCalibrationEngine
 
@@ -88,12 +88,24 @@ def run_pipeline() -> dict:
     pressures = weather["pressures"]
     blhs = weather["blh"]
 
+    num_hours = min(72, len(forecast_times))
+    hourly_weather = []
+    for h_i in range(num_hours):
+        hourly_weather.append({
+            "temp": temps[h_i] if h_i < len(temps) else 25.0,
+            "humidity": rhs[h_i] if h_i < len(rhs) else 55.0,
+            "wind_speed": ws[h_i] if h_i < len(ws) else 6.0,
+            "wind_dir": wdirs[h_i] if h_i < len(wdirs) else 280.0,
+            "blh": blhs[h_i] if h_i < len(blhs) else 450.0
+        })
+
     weather_summary = {
         "temp": temps[0] if temps else 25.0,
         "humidity": rhs[0] if rhs else 55.0,
         "wind_speed": ws[0] if ws else 6.0,
         "wind_dir": wdirs[0] if wdirs else 280.0,
-        "blh": blhs[0] if blhs else 450.0
+        "blh": blhs[0] if blhs else 450.0,
+        "hourly": hourly_weather
     }
 
     # 2. Generate H3 Spatial Grid (~1,500 hexagons)
@@ -251,8 +263,11 @@ def run_pipeline() -> dict:
         # 72h forecast integers
         f_72h = [int(round(x)) for x in forecast_matrix[hex_idx, :]]
 
-        attr = calculate_source_attribution(
+        attr = calculate_hyperlocal_source_attribution(
+            centroid_lat=c_lat,
+            centroid_lon=c_lon,
             zone_name=z_name,
+            local_aqi=base_cur_aqi,
             hour=now_dt.hour,
             wind_speed=ws[0] if ws else 6.0,
             wind_dir=wdirs[0] if wdirs else 290.0,

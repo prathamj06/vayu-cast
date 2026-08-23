@@ -3,24 +3,31 @@ import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 3600; // 1 hour ISR
+export const revalidate = 0; // Disable all static caching to ensure immediate real-time ingestion
 
 const REMOTE_DATA_BRANCH_URL = 'https://raw.githubusercontent.com/prathamj06/vayu-cast/data/delhi_current_grid.json';
 
 export async function GET() {
   try {
-    // 1. Try fetching latest live single-commit snapshot from GitHub 'data' branch
+    // 1. Try fetching latest real-time single-commit snapshot from GitHub 'data' branch with cache busting
     try {
-      const response = await fetch(REMOTE_DATA_BRANCH_URL, {
-        next: { revalidate: 3600 },
-        headers: { 'User-Agent': 'VayuCast-Edge-Service' },
+      const timestamp = Date.now();
+      const response = await fetch(`${REMOTE_DATA_BRANCH_URL}?t=${timestamp}`, {
+        cache: 'no-store',
+        headers: {
+          'User-Agent': 'VayuCast-Edge-Service',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
       });
 
       if (response.ok) {
         const remoteData = await response.json();
         return NextResponse.json(remoteData, {
           headers: {
-            'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
             'Access-Control-Allow-Origin': '*',
           },
         });
@@ -37,7 +44,7 @@ export async function GET() {
 
       return NextResponse.json(localData, {
         headers: {
-          'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
           'Access-Control-Allow-Origin': '*',
         },
       });
