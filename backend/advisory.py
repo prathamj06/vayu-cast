@@ -126,7 +126,7 @@ def generate_gemini_advisories(zones_data: Dict[str, Dict[str, Any]]) -> Dict[st
                 )
 
                 text = ""
-                for model_candidate in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest"]:
+                for model_candidate in ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"]:
                     try:
                         response = client.models.generate_content(
                             model=model_candidate,
