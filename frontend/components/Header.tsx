@@ -43,8 +43,14 @@ export const Header: React.FC<HeaderProps> = ({
                 NCT Delhi
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-medium">
-              {language === 'en' ? 'Urban Air Intelligence • 72h Forecast' : 'शहरी वायु गुणवत्ता मंच • 72 घंटे का पूर्वानुमान'}
+            <p className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
+              <span>{language === 'en' ? 'Urban Air Intelligence • 72h Forecast' : 'शहरी वायु गुणवत्ता मंच • 72 घंटे का पूर्वानुमान'}</span>
+              {data?.generated_at && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-cyan-400/90 font-mono text-[10px]">{data.generated_at}</span>
+                </>
+              )}
             </p>
           </div>
         </div>
