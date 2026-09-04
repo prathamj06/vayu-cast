@@ -187,6 +187,63 @@ class TestVayuForecastAccuracy(unittest.TestCase):
 
         print(f"\n[PAYLOAD INTEGRITY] Verified {len(hexagons)} hexagons. City Average AQI: {data['nct_average_aqi']} ({data['nct_category']})")
 
+    def test_05_chemical_source_attribution_receptor_model(self):
+        """
+        Verify that real-time chemical mass balance dynamically apportions pollution:
+        1. All attributions sum strictly to 100%.
+        2. Coarse dust excess (PM10 >> PM2.5) drives elevated dust contribution.
+        3. Elevated SO2 in industrial clusters drives industrial emission contribution.
+        4. Pure residential/green belts (South/Central Delhi) have 0% industrial emission.
+        """
+        from backend.advisory import calculate_hyperlocal_source_attribution
+
+        # Test Case 1: High coarse dust event (Anand Vihar road dust / construction)
+        dust_gases = {"pm25": 10.0, "pm10": 150.0, "no2": 15.0, "so2": 5.0, "co": 8.0}
+        attr_dust = calculate_hyperlocal_source_attribution(
+            centroid_lat=28.6469, centroid_lon=77.3160, zone_name="Anand Vihar",
+            local_aqi=90.0, hour=14, wind_speed=12.0, wind_dir=280.0, gases=dust_gases
+        )
+        self.assertEqual(sum(attr_dust.values()), 100)
+        self.assertGreaterEqual(attr_dust["dust"], 25, "Dust ratio should be significantly elevated when PM10 >> PM2.5")
+
+        # Test Case 2: Industrial chemical signature (Bawana high SO2)
+        ind_gases = {"pm25": 60.0, "pm10": 90.0, "no2": 18.0, "so2": 35.0, "co": 15.0}
+        attr_ind = calculate_hyperlocal_source_attribution(
+            centroid_lat=28.7762, centroid_lon=77.0511, zone_name="Bawana",
+            local_aqi=140.0, hour=12, wind_speed=5.0, wind_dir=260.0, gases=ind_gases
+        )
+        self.assertEqual(sum(attr_ind.values()), 100)
+        self.assertGreaterEqual(attr_ind["industry"], 30, "Industrial score should dominate in industrial cluster with high SO2")
+
+        # Test Case 3: Residential green belt (South Delhi)
+        res_gases = {"pm25": 30.0, "pm10": 45.0, "no2": 16.0, "so2": 4.0, "co": 10.0}
+        attr_res = calculate_hyperlocal_source_attribution(
+            centroid_lat=28.5283, centroid_lon=77.1893, zone_name="South Delhi",
+            local_aqi=65.0, hour=10, wind_speed=6.0, wind_dir=270.0, gases=res_gases
+        )
+        self.assertEqual(sum(attr_res.values()), 100)
+        self.assertEqual(attr_res["industry"], 0, "Residential South Delhi must have 0% industrial attribution")
+
+        # Verify all exported hexagons in JSON satisfy the 100% constraint
+        with open("frontend/public/data/delhi_current_grid.json", "r", encoding="utf-8") as f:
+            grid_data = json.load(f)
+        for hex_item in grid_data["hexagons"]:
+            h_attr = hex_item["source_attribution"]
+            self.assertEqual(sum(h_attr.values()), 100, f"Hex {hex_item['hex_id']} attribution must sum to 100%")
+
+        print("\n[SOURCE ATTRIBUTION] Verified dynamic chemical mass balance across all profiles (100% normalized).")
+
+    def test_06_datagov_fallback_cascade(self):
+        """
+        Verify that data.gov.in ingestion gracefully cascades without crashing on network timeout or invalid key.
+        """
+        from backend.ingestion.fetch_waqi import fetch_datagov_cpcb_telemetry
+
+        # Test with empty/dummy API key - must return [] without raising an unhandled exception
+        result = fetch_datagov_cpcb_telemetry("invalid_test_key_dummy_vayu")
+        self.assertIsInstance(result, list)
+        print("\n[DATAGOV CASCADE] Verified resilient non-blocking exception handling in data.gov.in module.")
+
 
 if __name__ == "__main__":
     unittest.main()

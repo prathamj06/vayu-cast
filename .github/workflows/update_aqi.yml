@@ -2,10 +2,10 @@ name: Hourly AQI Batch Ingestion & Forecast Pipeline
 
 on:
   schedule:
-    # Run at the top of every hour (00:00, 01:00, 02:00, ...)
-    - cron: '0 * * * *'
+    # Run at off-peak minute 17 of every hour (00:17, 01:17, 02:17, ...) to eliminate runner queue congestion
+    - cron: '17 * * * *'
   workflow_dispatch:
-    # Allow manual execution via GitHub UI
+    # Allow manual execution via GitHub UI or external webhook
 
 permissions:
   contents: write
@@ -30,8 +30,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Restore Calibration State from Data Branch
+        run: |
+          mkdir -p backend/data
+          git show origin/data:backend/data/calibration_state.json > backend/data/calibration_state.json 2>/dev/null || echo "No previous calibration state found on data branch; using baseline."
+
       - name: Execute Live Ingestion, XGBoost Forecasting & Gemini Advisories
         env:
+          DATAGOV_API_KEY: ${{ secrets.DATAGOV_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WAQI_API_TOKEN: ${{ secrets.WAQI_API_TOKEN }}
           OPENAQ_API_KEY: ${{ secrets.OPENAQ_API_KEY }}
@@ -39,15 +45,17 @@ jobs:
         run: |
           python -m backend.pipeline
 
-      - name: Deploy Snapshot to Single-Commit Data Branch
+      - name: Deploy Snapshot & Calibration State to Single-Commit Data Branch
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Stage the freshly generated JSON snapshot in a temporary directory
+          # Stage the freshly generated JSON snapshot and calibration ledger in a temporary directory
           mkdir -p /tmp/vayu_export/frontend/public/data
+          mkdir -p /tmp/vayu_export/backend/data
           cp frontend/public/data/delhi_current_grid.json /tmp/vayu_export/
           cp frontend/public/data/delhi_current_grid.json /tmp/vayu_export/frontend/public/data/
+          cp backend/data/calibration_state.json /tmp/vayu_export/backend/data/
           
           # Create a lightweight no-op frontend package so Vercel preview builds succeed cleanly
           cat << 'EOF' > /tmp/vayu_export/frontend/package.json
@@ -61,18 +69,20 @@ jobs:
           }
           EOF
           
-          # Switch to isolated orphan 'data' branch (zero historical bloat)
+          # Switch to isolated orphan 'data' branch (zero historical bloat on main)
           git checkout --orphan data
           git rm -rf .
           
-          # Place the single data snapshot files and dummy frontend
+          # Place the single data snapshot files, calibration state, and dummy frontend
           cp /tmp/vayu_export/delhi_current_grid.json ./
           mkdir -p frontend/public/data
+          mkdir -p backend/data
           cp /tmp/vayu_export/frontend/public/data/delhi_current_grid.json ./frontend/public/data/
+          cp /tmp/vayu_export/backend/data/calibration_state.json ./backend/data/
           cp /tmp/vayu_export/frontend/package.json ./frontend/package.json
           
           git add .
-          git commit -m "chore(data): live hourly AQI grid snapshot [skip ci]"
+          git commit -m "chore(data): live hourly AQI grid snapshot & calibration state [skip ci]"
           
           # Force push to overwrite previous data commit (guarantees exactly 1 commit forever)
           git push --force origin data
