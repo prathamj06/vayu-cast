@@ -5,11 +5,13 @@ anchored strictly to the CURRENT live hour (Asia/Kolkata timezone),
 computes U/V wind components and Boundary Layer Height inversions.
 """
 
+from __future__ import annotations
+
 import math
 import logging
 import datetime
 import requests
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Tuple
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

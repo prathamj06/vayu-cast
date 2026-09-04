@@ -4,6 +4,8 @@ Directly ingests live CPCB / DPCC station telemetry via concurrent WAQI individu
 with strict timestamp freshness validation (>48h stale rejection) and dynamic meteorology-grounded fallback.
 """
 
+from __future__ import annotations
+
 import os
 import time
 import math
