@@ -6,11 +6,14 @@ IDW spatial interpolation, Open-Meteo 72h meteorology, self-correcting adaptive 
 vectorized XGBoost rolling inference, Gemini multilingual advisories, and static snapshot export.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json
 import logging
 import datetime
+from typing import Dict, List, Tuple, Any, Optional
 import numpy as np
 import pandas as pd
 import xgboost as xgb

@@ -4,9 +4,11 @@ Constructs Delhi's Uber H3 Resolution 8 Spatial Grid (~1,500 hexagons)
 and maps non-uniform CPCB telemetry points onto hexagon centroids via IDW.
 """
 
+from __future__ import annotations
+
 import math
 import logging
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 import numpy as np
 
 # Configure logging

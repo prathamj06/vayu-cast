@@ -4,11 +4,13 @@ Generates context-aware medical/health advisories without redundant numerical AQ
 and calculates continuous, spatially unique source attribution for each individual hexagon centroid.
 """
 
+from __future__ import annotations
+
 import os
 import math
 import time
 import logging
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional, List
 from dotenv import load_dotenv
 
 load_dotenv()

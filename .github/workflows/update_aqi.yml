@@ -33,7 +33,8 @@ jobs:
       - name: Restore Calibration State from Data Branch
         run: |
           mkdir -p backend/data
-          git show origin/data:backend/data/calibration_state.json > backend/data/calibration_state.json 2>/dev/null || echo "No previous calibration state found on data branch; using baseline."
+          git fetch origin data --depth=1 || true
+          git show origin/data:backend/data/calibration_state.json > /tmp/cal_state.json 2>/dev/null && cp /tmp/cal_state.json backend/data/calibration_state.json || echo "No previous calibration state found on data branch; using baseline."
 
       - name: Execute Live Ingestion, XGBoost Forecasting & Gemini Advisories
         env:

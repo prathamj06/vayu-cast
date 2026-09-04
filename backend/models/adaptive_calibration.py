@@ -5,6 +5,8 @@ computes residual errors, Mean Bias Error (MBE), MAPE, and applies an adaptive
 Kalman/EMA feedback recalibration vector to prevent prediction drift and sustain 95%+ accuracy.
 """
 
+from __future__ import annotations
+
 import os
 import json
 import logging
