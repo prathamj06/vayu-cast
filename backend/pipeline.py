@@ -120,11 +120,23 @@ def run_pipeline() -> dict:
     telemetry_health = get_telemetry_status()
     logger.info(f"Ingested {len(station_points)} ground station feeds (Mode: {telemetry_health.get('ingestion_mode')}).")
 
-    # 4. IDW Spatial Interpolation for Current Hour AQI
+    # 4. IDW Spatial Interpolation for Current Hour AQI and Multi-Pollutant Gas Fields
     logger.info("4. Running Inverse Distance Weighting (IDW) spatial interpolation...")
-    current_aqis = np.array(idw_interpolation(target_points, station_points, power=2.0), dtype=float)
+    idw_station_pts = [(p[0], p[1], p[2]) for p in station_points]
+    current_aqis = np.array(idw_interpolation(target_points, idw_station_pts, power=2.0), dtype=float)
     city_mean_current = float(np.mean(current_aqis))
     logger.info(f"IDW spatial range: Min={np.min(current_aqis):.1f}, Max={np.max(current_aqis):.1f}, Mean={city_mean_current:.1f}")
+
+    # Interpolate continuous multi-pollutant gas fields (pm25, pm10, no2, so2, co) across all hexagons
+    gas_keys = ["pm25", "pm10", "no2", "so2", "co"]
+    grid_gases: Dict[str, List[float]] = {k: [] for k in gas_keys}
+    for k in gas_keys:
+        k_pts = [(p[0], p[1], float(p[3].get(k, 15.0))) for p in station_points if len(p) > 3 and isinstance(p[3], dict)]
+        if k_pts:
+            grid_gases[k] = idw_interpolation(target_points, k_pts, power=2.0)
+        else:
+            grid_gases[k] = [15.0 for _ in target_points]
+    logger.info("Interpolated multi-pollutant chemical fields for data-driven source attribution.")
 
     # 5. Continuous Self-Correction & Adaptive Recalibration Loop
     logger.info("5. Executing Adaptive Self-Correction & Error Recalibration Loop...")
@@ -255,6 +267,7 @@ def run_pipeline() -> dict:
     # 11. Assemble Hexagon Payloads with Source Attribution & Translucent Color
     hexagons_payload = []
     total_nct_aqi = 0.0
+    zone_hex_attrs: Dict[str, List[Dict[str, int]]] = {}
 
     for hex_idx, hex_data in enumerate(grid):
         hex_id = hex_data["hex_id"]
@@ -266,6 +279,7 @@ def run_pipeline() -> dict:
         # 72h forecast integers
         f_72h = [int(round(x)) for x in forecast_matrix[hex_idx, :]]
 
+        hex_gas_profile = {k: grid_gases[k][hex_idx] for k in gas_keys}
         attr = calculate_hyperlocal_source_attribution(
             centroid_lat=c_lat,
             centroid_lon=c_lon,
@@ -274,8 +288,13 @@ def run_pipeline() -> dict:
             hour=now_dt.hour,
             wind_speed=ws[0] if ws else 6.0,
             wind_dir=wdirs[0] if wdirs else 290.0,
-            month=now_dt.month
+            month=now_dt.month,
+            gases=hex_gas_profile
         )
+
+        if z_name not in zone_hex_attrs:
+            zone_hex_attrs[z_name] = []
+        zone_hex_attrs[z_name].append(attr)
 
         zone_adv = advisories.get(z_name, {
             "en": "Air quality is monitored continuously. Maintain standard precautions.",
@@ -297,14 +316,43 @@ def run_pipeline() -> dict:
     avg_nct_aqi = round(float(total_nct_aqi / max(1, n_hex)), 1)
     nct_category = get_category_name(avg_nct_aqi)
 
-    # 12. Build Master Grid Payload
+    # 12. Build Master Grid Payload with Dynamic Chemical Dominant Source
     zones_summary = {}
     for z_name, avg_val in zone_avg_aqi.items():
         adv = advisories.get(z_name, {"en": "", "hi": ""})
+        z_attrs = zone_hex_attrs.get(z_name, [])
+        if z_attrs:
+            avg_t = np.mean([a["traffic"] for a in z_attrs])
+            avg_d = np.mean([a["dust"] for a in z_attrs])
+            avg_i = np.mean([a["industry"] for a in z_attrs])
+            avg_s = np.mean([a["stubble"] for a in z_attrs])
+            top_val = max(avg_t, avg_d, avg_i, avg_s)
+            if top_val == avg_t:
+                dominant_source = "Vehicular Traffic"
+            elif top_val == avg_d:
+                dominant_source = "Road Dust & Construction"
+            elif top_val == avg_i:
+                dominant_source = "Industrial Emissions"
+            else:
+                dominant_source = "Agricultural Stubble"
+        else:
+            dominant_source = "Vehicular Traffic"
+
         zones_summary[z_name] = {
             "current_aqi": round(avg_val),
             "category": get_category_name(avg_val),
-            "dominant_source": "Vehicular Traffic" if avg_val < 150 else "Industrial & Vehicular Emissions",
+            "dominant_source": dominant_source,
+            "source_attribution": {
+                "traffic": int(round(avg_t)),
+                "dust": int(round(avg_d)),
+                "industry": int(round(avg_i)),
+                "stubble": int(round(avg_s))
+            } if z_attrs else {
+                "traffic": 50,
+                "dust": 20,
+                "industry": 20,
+                "stubble": 10
+            },
             "advisory_en": adv.get("en", ""),
             "advisory_hi": adv.get("hi", "")
         }

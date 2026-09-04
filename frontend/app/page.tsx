@@ -77,7 +77,7 @@ export default function VayuDashboard() {
 
   const handleSelectHexagon = (hex: HexagonData) => {
     setSelectedHexagon(hex);
-    setSelectedZone(hex.zone_name);
+    // Single-hex selection remains strictly isolated; do not force selectedZone
   };
 
   if (loading) {

@@ -193,15 +193,15 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
           const isHexSelected = selectedHexagon?.hex_id === d.hex_id;
           const isZoneSelected = selectedZone && d.zone_name.toLowerCase() === selectedZone.toLowerCase();
 
-          if (isHexSelected) return getAQIRGB(aqiVal, 160);
+          if (isHexSelected) return getAQIRGB(aqiVal, 185);
           if (isZoneSelected) return getAQIRGB(aqiVal, 115);
           if (selectedZone && !isZoneSelected) return getAQIRGB(aqiVal, 28);
           return getAQIRGB(aqiVal, 65);
         },
         // Precise regional boundary stroke:
-        // - Selected hex: Pure white solid border
-        // - Selected zone constituent hexes: Glowing cyan border
-        // - Others: subtle grid edge
+        // - Selected hex: Pure white solid border (3.0px)
+        // - Selected zone constituent hexes: Glowing cyan border (1.6px)
+        // - Others: subtle grid edge (0.7px)
         getLineColor: (d) => {
           if (selectedHexagon?.hex_id === d.hex_id) {
             return [255, 255, 255, 255]; // Pure white highlight on single hex selection
@@ -212,7 +212,7 @@ const AQIMapInner: React.FC<AQIMapProps> = ({
           return [255, 255, 255, 20];     // Subtle grid boundary
         },
         getLineWidth: (d) => {
-          if (selectedHexagon?.hex_id === d.hex_id) return 2.8;
+          if (selectedHexagon?.hex_id === d.hex_id) return 3.0;
           if (selectedZone && d.zone_name.toLowerCase() === selectedZone.toLowerCase()) return 1.6;
           return 0.7;
         },

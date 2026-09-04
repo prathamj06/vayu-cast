@@ -69,6 +69,7 @@ export interface GridPayload {
       current_aqi: number;
       category?: string;
       dominant_source: string;
+      source_attribution?: SourceAttribution;
       advisory_en: string;
       advisory_hi: string;
     };
