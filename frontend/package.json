@@ -1,0 +1,8 @@
+{
+  "name": "vayucast-data-feed",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Data branch preview build skipped' && exit 0"
+  }
+}
